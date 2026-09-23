@@ -98,7 +98,9 @@ class UR12eInterface(Node):
         return {name: math.degrees(by_name[name]) for name in JOINT_NAMES}
 
     def send_trajectory(self, target_deg, duration_s):
-        """Send a one-point trajectory to the controller and wait for the result."""
+        """Send a one-point trajectory to the controller and wait for it.
+
+        Returns True if the motion completed, False if stop() cancelled it."""
         if not self._client.wait_for_server(timeout_sec=3.0):
             raise RuntimeError(f"Action server {ACTION_NAME} not available. Is the driver running?")
 
@@ -118,13 +120,14 @@ class UR12eInterface(Node):
         wrapped = _wait(goal_handle.get_result_async(), timeout_s=duration_s + 10.0)
         self._goal_handle = None
         if wrapped.status == GoalStatus.STATUS_CANCELED:
-            raise RuntimeError("Motion was stopped before it finished.")
+            return False
         result = wrapped.result
         if result.error_code != 0:
             raise RuntimeError(
                 f"Trajectory failed: {result.error_string} (code {result.error_code}). "
                 "If the arm did not move at all, check the pendant is in Real mode, not Simulation, "
                 "and that the External Control program is playing.")
+        return True
 
     def cancel(self):
         if self._goal_handle is None:
@@ -224,8 +227,10 @@ def move_joint(joint: int, degrees: float) -> str:
     # Safety check 3 and 4: fixed slow duration, and say what we are about to do.
     print(f"[robot] move joint {joint} ({name}) by {degrees:+.1f} deg: "
           f"{current[name]:.1f} -> {target[name]:.1f} deg over {MOVE_DURATION_S} s")
-    robot.send_trajectory([target[n] for n in JOINT_NAMES], MOVE_DURATION_S)
+    completed = robot.send_trajectory([target[n] for n in JOINT_NAMES], MOVE_DURATION_S)
     now = robot.joint_positions_deg()[name]      # report what happened, not what was asked
+    if not completed:
+        return f"Stopped part-way by the operator. Joint {joint} is at {now:.1f} deg."
     return f"Done. Joint {joint} moved by {now - current[name]:+.1f} deg and is now at {now:.1f} deg."
 
 
@@ -237,7 +242,8 @@ def go_home() -> str:
     largest = max(abs(current[n] - h) for n, h in zip(JOINT_NAMES, HOME_DEG))
     duration = max(MOVE_DURATION_S, largest / MAX_SPEED_DEG_S)
     print(f"[robot] go home: largest joint change {largest:.1f} deg over {duration:.1f} s")
-    robot.send_trajectory(HOME_DEG, duration)
+    if not robot.send_trajectory(HOME_DEG, duration):
+        return "Stopped part-way by the operator. The arm is NOT at its home pose."
     return "Done. The arm is at its home pose."
 
 
