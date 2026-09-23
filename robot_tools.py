@@ -142,18 +142,20 @@ def _wait(future, timeout_s=10.0):
 
 _robot = None
 _executor = None
+_spin_thread = None
 _command_time = time.time()
 
 
 def _get_robot():
     """Create the node on first use and spin it in a background thread."""
-    global _robot, _executor
+    global _robot, _executor, _spin_thread
     if _robot is None:
         rclpy.init()
         _robot = UR12eInterface()
         _executor = SingleThreadedExecutor()
         _executor.add_node(_robot)
-        threading.Thread(target=_executor.spin, daemon=True).start()
+        _spin_thread = threading.Thread(target=_executor.spin, daemon=True)
+        _spin_thread.start()
     return _robot
 
 
@@ -161,6 +163,8 @@ def shutdown():
     """Stop the background thread cleanly so Python can exit without complaint."""
     if _executor is not None:
         _executor.shutdown()
+        _spin_thread.join(timeout=2.0)
+        _robot.destroy_node()
         rclpy.shutdown()
 
 
