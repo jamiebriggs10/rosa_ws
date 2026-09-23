@@ -24,6 +24,7 @@ import time
 
 import rclpy
 from rclpy.action import ActionClient
+from action_msgs.msg import GoalStatus
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from builtin_interfaces.msg import Duration
@@ -114,8 +115,11 @@ class UR12eInterface(Node):
         self._goal_handle = goal_handle
         print(f"[robot] motion started {time.time() - _command_time:.2f} s after the command was entered")
 
-        result = _wait(goal_handle.get_result_async(), timeout_s=duration_s + 10.0).result
+        wrapped = _wait(goal_handle.get_result_async(), timeout_s=duration_s + 10.0)
         self._goal_handle = None
+        if wrapped.status == GoalStatus.STATUS_CANCELED:
+            raise RuntimeError("Motion was stopped before it finished.")
+        result = wrapped.result
         if result.error_code != 0:
             raise RuntimeError(
                 f"Trajectory failed: {result.error_string} (code {result.error_code}). "
@@ -221,7 +225,8 @@ def move_joint(joint: int, degrees: float) -> str:
     print(f"[robot] move joint {joint} ({name}) by {degrees:+.1f} deg: "
           f"{current[name]:.1f} -> {target[name]:.1f} deg over {MOVE_DURATION_S} s")
     robot.send_trajectory([target[n] for n in JOINT_NAMES], MOVE_DURATION_S)
-    return f"Done. Joint {joint} moved by {degrees:+.1f} deg and is now at {target[name]:.1f} deg."
+    now = robot.joint_positions_deg()[name]      # report what happened, not what was asked
+    return f"Done. Joint {joint} moved by {now - current[name]:+.1f} deg and is now at {now:.1f} deg."
 
 
 @tool
