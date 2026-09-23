@@ -1,0 +1,2 @@
+jpl-rosa==1.0.10
+langchain-ollama==0.3.10

@@ -1,0 +1,8 @@
+This project uses ROSA (Robot Operating System Agent).
+Copyright (c) 2024 Jet Propulsion Laboratory. All rights reserved.
+Licensed under the Apache License, Version 2.0.
+https://github.com/nasa-jpl/rosa
+
+ROSA is installed unmodified from PyPI (jpl-rosa). This project's own files
+(config.py, robot_tools.py, rosa_agent.py) are Jamie Briggs's dissertation
+work built on top of it.
