@@ -135,7 +135,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let shown = 0, pendingId = null;
+let shown = 0, pendingId = null, helpAutoClosed = false;
 
 async function post(url, body) {
   const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
@@ -172,7 +172,8 @@ async function refresh() {
 
   const box = $("messages");
   for (; shown < s.messages.length; shown++) box.appendChild(renderMessage(s.messages[shown]));
-  if (s.messages.length && $("help").open && shown > 0) $("help").open = false;
+  // Fold the help away once, after the first command. After that it is yours to open and close.
+  if (shown > 0 && !helpAutoClosed) { $("help").open = false; helpAutoClosed = true; }
 
   const gate = $("gate");
   if (s.pending && s.pending.id !== pendingId) {
