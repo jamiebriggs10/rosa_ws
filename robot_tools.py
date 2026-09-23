@@ -114,10 +114,13 @@ class UR12eInterface(Node):
         self._goal_handle = goal_handle
         print(f"[robot] motion started {time.time() - _command_time:.2f} s after the command was entered")
 
-        result = _wait(goal_handle.get_result_async(), timeout_s=duration_s + 5.0).result
+        result = _wait(goal_handle.get_result_async(), timeout_s=duration_s + 10.0).result
         self._goal_handle = None
         if result.error_code != 0:
-            raise RuntimeError(f"Trajectory failed: {result.error_string} (code {result.error_code})")
+            raise RuntimeError(
+                f"Trajectory failed: {result.error_string} (code {result.error_code}). "
+                "If the arm did not move at all, check the pendant is in Real mode, not Simulation, "
+                "and that the External Control program is playing.")
 
     def cancel(self):
         if self._goal_handle is None:
@@ -138,19 +141,27 @@ def _wait(future, timeout_s=10.0):
 
 
 _robot = None
+_executor = None
 _command_time = time.time()
 
 
 def _get_robot():
     """Create the node on first use and spin it in a background thread."""
-    global _robot
+    global _robot, _executor
     if _robot is None:
         rclpy.init()
         _robot = UR12eInterface()
-        executor = SingleThreadedExecutor()
-        executor.add_node(_robot)
-        threading.Thread(target=executor.spin, daemon=True).start()
+        _executor = SingleThreadedExecutor()
+        _executor.add_node(_robot)
+        threading.Thread(target=_executor.spin, daemon=True).start()
     return _robot
+
+
+def shutdown():
+    """Stop the background thread cleanly so Python can exit without complaint."""
+    if _executor is not None:
+        _executor.shutdown()
+        rclpy.shutdown()
 
 
 def mark_command_time():

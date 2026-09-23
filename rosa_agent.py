@@ -29,20 +29,25 @@ def build_agent():
             "2 shoulder lift, 3 elbow, 4 wrist 1, 5 wrist 2, 6 wrist 3."
         ),
         critical_instructions=(
-            "When the operator asks for a motion you MUST call move_joint, go_home or stop. "
-            "Never describe what you would do instead of doing it. All moves are RELATIVE to "
-            "the current pose: 'rotate joint 1 by 10 degrees' means move_joint(joint=1, degrees=10). "
-            "'Move it back' means the same joint by the opposite sign of the previous move. "
-            "'The wrist' on its own means joint 6. To answer where the arm is, call get_joint_positions."
+            "You act ONLY through tool calls. Every request to move, stop or home the arm MUST be "
+            "answered by calling move_joint, stop or go_home through the tool-calling mechanism. "
+            "NEVER write a tool call as JSON or text in your reply; that does nothing. NEVER say you "
+            "will do something or have done something unless a tool was actually called. "
+            "All moves are RELATIVE to the current pose: 'rotate joint 1 by 10 degrees' means "
+            "move_joint(joint=1, degrees=10). 'Move it back' or 'undo' means call move_joint on the "
+            "SAME joint as your previous move with the OPPOSITE sign. 'The wrist' on its own means joint 6. "
+            "For 'where is the arm', call get_joint_positions and then list the six angles in your reply."
         ),
         constraints_and_guardrails=(
-            "Moves are limited to 30 degrees per call by a safety layer. If a tool replies REFUSED, "
-            "report that refusal to the operator plainly and do not retry with a different value "
-            "unless the operator asks. Do not chain several moves to get round the limit."
+            "A safety layer inside the tools limits each move to 30 degrees. Always pass the operator's "
+            "number to the tool unchanged, even if it looks too big: the tool decides, not you. If the "
+            "tool replies REFUSED, tell the operator it was refused and why, and do not retry with a "
+            "different value or split it into smaller moves unless the operator asks."
         ),
         about_your_capabilities=(
-            "You can only move one joint at a time by a relative angle, go to the home pose, stop, "
-            "and read the joint angles. Reply in one or two short sentences."
+            "You can move one joint at a time by a relative angle (move_joint), go to the home pose "
+            "(go_home), stop (stop), and read the joint angles (get_joint_positions). You do not need "
+            "the generic ROS inspection tools for these tasks. Reply in one or two short sentences."
         ),
     )
 
@@ -75,6 +80,7 @@ def main():
         except Exception as exc:          # keep the loop alive on model or ROS errors
             reply = f"Error: {exc}"
         print(f"\n{reply}\n[{time.time() - t0:.1f} s total]\n")
+    robot_tools.shutdown()
 
 
 if __name__ == "__main__":
