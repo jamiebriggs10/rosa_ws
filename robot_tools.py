@@ -27,9 +27,11 @@ from rclpy.action import ActionClient
 from action_msgs.msg import GoalStatus
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from sensor_msgs.msg import JointState
+from std_msgs.msg import Bool
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from langchain_core.tools import tool
 
@@ -80,12 +82,24 @@ class UR12eInterface(Node):
     def __init__(self):
         super().__init__("rosa_ur12e_tools")
         self._latest = None                       # the last JointState message
+        self.last_joint_state_time = 0.0          # when it arrived, for the status display
+        self.program_running = None               # True when the pendant program is playing
         self._goal_handle = None                  # the trajectory in progress
         self.create_subscription(JointState, "/joint_states", self._on_joint_state, 10)
+        # The driver publishes this only when it changes, "latched" so late joiners
+        # still get the last value. Our subscription must ask for that (transient local).
+        latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                             durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(Bool, "/io_and_status_controller/robot_program_running",
+                                 self._on_program_running, latched)
         self._client = ActionClient(self, FollowJointTrajectory, ACTION_NAME)
 
     def _on_joint_state(self, msg):
         self._latest = msg
+        self.last_joint_state_time = time.time()
+
+    def _on_program_running(self, msg):
+        self.program_running = msg.data
 
     def joint_positions_deg(self, timeout_s=3.0):
         """Return {joint name: degrees} in controller order, or raise if no data."""
@@ -115,7 +129,9 @@ class UR12eInterface(Node):
         if not goal_handle.accepted:
             raise RuntimeError("Controller rejected the trajectory goal.")
         self._goal_handle = goal_handle
-        print(f"[robot] motion started {time.time() - _command_time:.2f} s after the command was entered")
+        to_motion = time.time() - _command_time - _current_event.get("confirm_wait_s", 0.0)
+        _current_event["to_motion_s"] = round(to_motion, 2)
+        print(f"[robot] motion started {to_motion:.2f} s after the command was entered (excluding confirmation)")
 
         wrapped = _wait(goal_handle.get_result_async(), timeout_s=duration_s + 10.0)
         self._goal_handle = None
@@ -181,6 +197,57 @@ def mark_command_time():
     _command_time = time.time()
 
 
+# ---------------------------------------------------------------------------
+# The operator gate and the event record
+# ---------------------------------------------------------------------------
+# Before any motion the tool describes what it is about to do and asks the
+# operator. The default asks y/n in the terminal; the web console swaps in
+# its own handler that shows a card with Confirm and Cancel.
+
+def _terminal_confirm(description):
+    answer = input(f"[confirm] {description}\nType y to go ahead: ").strip().lower()
+    return answer == "y"
+
+
+_confirm_handler = _terminal_confirm
+
+
+def set_confirm_handler(handler):
+    """handler(description: str) -> bool. True means go ahead."""
+    global _confirm_handler
+    _confirm_handler = handler
+
+
+def _confirm(description):
+    """Ask the operator, and note how long they took so timings stay honest."""
+    t0 = time.time()
+    ok = _confirm_handler(description)
+    _current_event["confirm_wait_s"] = round(time.time() - t0, 2)
+    return ok
+
+
+# Every tool call appends one record here, so the agent or the web console can
+# show what actually happened, independent of what the model says happened.
+events = []
+_current_event = {}
+
+
+def _record(tool, args, outcome, message):
+    _current_event.update(tool=tool, args=args, outcome=outcome, message=message)
+    events.append(dict(_current_event))
+    _current_event.clear()
+    return message
+
+
+def status():
+    """What the status strip needs: is the driver alive, is the program playing."""
+    robot = _get_robot()
+    return {
+        "driver": time.time() - robot.last_joint_state_time < 1.0,
+        "program": bool(robot.program_running),
+    }
+
+
 def _joint_name(joint):
     if not 1 <= joint <= 6:
         raise ValueError("joint must be 1 to 6")
@@ -197,7 +264,7 @@ def get_joint_positions() -> str:
     Use this to answer questions like "where is the arm" or "what is joint 3 at"."""
     positions = _get_robot().joint_positions_deg()
     lines = [f"joint {i + 1} ({name}): {deg:.1f} deg" for i, (name, deg) in enumerate(positions.items())]
-    return "\n".join(lines)
+    return _record("get_joint_positions", {}, "done", "\n".join(lines))
 
 
 @tool
@@ -206,12 +273,14 @@ def move_joint(joint: int, degrees: float) -> str:
     joint: 1 = base (shoulder pan), 2 = shoulder lift, 3 = elbow, 4 = wrist 1, 5 = wrist 2, 6 = wrist 3.
     "the wrist" on its own means joint 6. Positive degrees rotate one way, negative the other.
     Moves bigger than 30 degrees are refused by the safety layer, so ask for smaller steps."""
+    args = {"joint": joint, "degrees": degrees}
     name = _joint_name(joint)
 
     # Safety check 1: cap the size of any single move.
     if abs(degrees) > MAX_RELATIVE_DEG:
-        return (f"REFUSED by safety layer: a relative move of {degrees} deg exceeds the "
-                f"limit of +/-{MAX_RELATIVE_DEG} deg. Nothing was moved.")
+        return _record("move_joint", args, "refused",
+                       f"REFUSED by safety layer: a relative move of {degrees} deg exceeds the "
+                       f"limit of +/-{MAX_RELATIVE_DEG} deg. Nothing was moved.")
 
     robot = _get_robot()
     current = robot.joint_positions_deg()
@@ -221,17 +290,26 @@ def move_joint(joint: int, degrees: float) -> str:
     # Safety check 2: the target must stay inside the joint's limits.
     lo, hi = JOINT_LIMITS_DEG[name]
     if not lo <= target[name] <= hi:
-        return (f"REFUSED by safety layer: joint {joint} would end at {target[name]:.1f} deg, "
-                f"outside its limits of {lo} to {hi} deg. Nothing was moved.")
+        return _record("move_joint", args, "refused",
+                       f"REFUSED by safety layer: joint {joint} would end at {target[name]:.1f} deg, "
+                       f"outside its limits of {lo} to {hi} deg. Nothing was moved.")
 
     # Safety check 3 and 4: fixed slow duration, and say what we are about to do.
-    print(f"[robot] move joint {joint} ({name}) by {degrees:+.1f} deg: "
-          f"{current[name]:.1f} -> {target[name]:.1f} deg over {MOVE_DURATION_S} s")
+    description = (f"move joint {joint} ({name}) by {degrees:+.1f} deg: "
+                   f"{current[name]:.1f} -> {target[name]:.1f} deg over {MOVE_DURATION_S} s")
+    print(f"[robot] {description}")
+
+    # The operator gate.
+    if not _confirm(description):
+        return _record("move_joint", args, "cancelled", "Cancelled by the operator. Nothing was moved.")
+
     completed = robot.send_trajectory([target[n] for n in JOINT_NAMES], MOVE_DURATION_S)
     now = robot.joint_positions_deg()[name]      # report what happened, not what was asked
     if not completed:
-        return f"Stopped part-way by the operator. Joint {joint} is at {now:.1f} deg."
-    return f"Done. Joint {joint} moved by {now - current[name]:+.1f} deg and is now at {now:.1f} deg."
+        return _record("move_joint", args, "stopped",
+                       f"Stopped part-way by the operator. Joint {joint} is at {now:.1f} deg.")
+    return _record("move_joint", args, "done",
+                   f"Done. Joint {joint} moved by {now - current[name]:+.1f} deg and is now at {now:.1f} deg.")
 
 
 @tool
@@ -241,18 +319,23 @@ def go_home() -> str:
     current = robot.joint_positions_deg()
     largest = max(abs(current[n] - h) for n, h in zip(JOINT_NAMES, HOME_DEG))
     duration = max(MOVE_DURATION_S, largest / MAX_SPEED_DEG_S)
-    print(f"[robot] go home: largest joint change {largest:.1f} deg over {duration:.1f} s")
+    description = f"go home: largest joint change {largest:.1f} deg over {duration:.1f} s"
+    print(f"[robot] {description}")
+
+    if not _confirm(description):
+        return _record("go_home", {}, "cancelled", "Cancelled by the operator. Nothing was moved.")
+
     if not robot.send_trajectory(HOME_DEG, duration):
-        return "Stopped part-way by the operator. The arm is NOT at its home pose."
-    return "Done. The arm is at its home pose."
+        return _record("go_home", {}, "stopped", "Stopped part-way by the operator. The arm is NOT at its home pose.")
+    return _record("go_home", {}, "done", "Done. The arm is at its home pose.")
 
 
 @tool
 def stop() -> str:
     """Immediately stop the arm by cancelling the motion that is in progress."""
     if _get_robot().cancel():
-        return "Stopped: the active motion was cancelled."
-    return "Nothing to stop: the arm was not moving."
+        return _record("stop", {}, "done", "Stopped: the active motion was cancelled.")
+    return _record("stop", {}, "done", "Nothing to stop: the arm was not moving.")
 
 
 ALL_TOOLS = [get_joint_positions, move_joint, go_home, stop]

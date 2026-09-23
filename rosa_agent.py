@@ -79,7 +79,12 @@ def main():
             reply = agent.invoke(line)
         except Exception as exc:          # keep the loop alive on model or ROS errors
             reply = f"Error: {exc}"
-        print(f"\n{reply}\n[{time.time() - t0:.1f} s total]\n")
+        print(f"\n{reply}")
+        for e in robot_tools.events:
+            timing = f", {e['to_motion_s']} s to motion" if "to_motion_s" in e else ""
+            print(f"  [{e['outcome']}] {e['tool']} {e['args']}{timing}")
+        robot_tools.events.clear()
+        print(f"[{time.time() - t0:.1f} s total]\n")
     robot_tools.shutdown()
 
 
