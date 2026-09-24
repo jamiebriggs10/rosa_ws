@@ -35,6 +35,8 @@ from std_msgs.msg import Bool
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from langchain_core.tools import tool
 
+import config
+
 # ---------------------------------------------------------------------------
 # Robot facts
 # ---------------------------------------------------------------------------
@@ -42,24 +44,20 @@ from langchain_core.tools import tool
 # The order the scaled_joint_trajectory_controller expects, from the driver's
 # ur_controllers.yaml. This is NOT the order /joint_states publishes in, so
 # we always look joints up by name and never by position in a list.
-JOINT_NAMES = [
+JOINT_NAMES = [config.JOINT_PREFIX + n for n in [
     "shoulder_pan_joint",   # joint 1, the base
     "shoulder_lift_joint",  # joint 2, the shoulder
     "elbow_joint",          # joint 3, the elbow
     "wrist_1_joint",        # joint 4
     "wrist_2_joint",        # joint 5
     "wrist_3_joint",        # joint 6, the tool flange
-]
+]]
 
 # From ur_description/config/ur12e/joint_limits.yaml (degrees).
-JOINT_LIMITS_DEG = {
-    "shoulder_pan_joint": (-360.0, 360.0),
-    "shoulder_lift_joint": (-360.0, 360.0),
-    "elbow_joint": (-180.0, 180.0),
-    "wrist_1_joint": (-360.0, 360.0),
-    "wrist_2_joint": (-360.0, 360.0),
-    "wrist_3_joint": (-360.0, 360.0),
-}
+JOINT_LIMITS_DEG = dict(zip(JOINT_NAMES, [
+    (-360.0, 360.0), (-360.0, 360.0), (-180.0, 180.0),
+    (-360.0, 360.0), (-360.0, 360.0), (-360.0, 360.0),
+]))
 
 # A safe, known pose: arm pointing straight up, which is URSim's start pose.
 HOME_DEG = [0.0, -90.0, 0.0, -90.0, 0.0, 0.0]
@@ -69,7 +67,7 @@ MAX_RELATIVE_DEG = 30.0   # biggest single relative move we will accept
 MOVE_DURATION_S = 4.0     # every move takes at least this long (slow)
 MAX_SPEED_DEG_S = 15.0    # go_home stretches its duration to stay under this
 
-ACTION_NAME = "/scaled_joint_trajectory_controller/follow_joint_trajectory"
+ACTION_NAME = config.ACTION_NAME
 
 
 # ---------------------------------------------------------------------------
