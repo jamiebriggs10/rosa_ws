@@ -305,11 +305,19 @@ def move_joint(joint: int, degrees: float) -> str:
 
     completed = robot.send_trajectory([target[n] for n in JOINT_NAMES], MOVE_DURATION_S)
     now = robot.joint_positions_deg()[name]      # report what happened, not what was asked
+    moved = now - current[name]
     if not completed:
         return _record("move_joint", args, "stopped",
                        f"Stopped part-way by the operator. Joint {joint} is at {now:.1f} deg.")
+    # The controller's own goal tolerance is about 5.7 deg, so for small moves it
+    # can report success without the arm moving. Trust the measurement, not the controller.
+    if abs(moved) < 0.5 * abs(degrees):
+        return _record("move_joint", args, "no_motion",
+                       f"NO MOTION: the controller reported success but joint {joint} moved only "
+                       f"{moved:+.1f} of {degrees:+.1f} deg and is at {now:.1f} deg. On a real robot check the "
+                       f"pendant: enabling switch held, program running, no protective stop.")
     return _record("move_joint", args, "done",
-                   f"Done. Joint {joint} moved by {now - current[name]:+.1f} deg and is now at {now:.1f} deg.")
+                   f"Done. Joint {joint} moved by {moved:+.1f} deg and is now at {now:.1f} deg.")
 
 
 @tool
