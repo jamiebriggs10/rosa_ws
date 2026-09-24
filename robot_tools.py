@@ -31,7 +31,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float64
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from langchain_core.tools import tool
 
@@ -82,6 +82,7 @@ class UR12eInterface(Node):
         self._latest = None                       # the last JointState message
         self.last_joint_state_time = 0.0          # when it arrived, for the status display
         self.program_running = None               # True when the pendant program is playing
+        self.speed_scaling = 100.0                # the pendant's speed slider, in percent
         self._goal_handle = None                  # the trajectory in progress
         self.create_subscription(JointState, "/joint_states", self._on_joint_state, 10)
         # The driver publishes this only when it changes, "latched" so late joiners
@@ -90,7 +91,16 @@ class UR12eInterface(Node):
                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(Bool, "/io_and_status_controller/robot_program_running",
                                  self._on_program_running, latched)
+        self.create_subscription(Float64, "/speed_scaling_state_broadcaster/speed_scaling",
+                                 self._on_speed_scaling, 10)
         self._client = ActionClient(self, FollowJointTrajectory, ACTION_NAME)
+
+    def _on_speed_scaling(self, msg):
+        self.speed_scaling = msg.data
+
+    def expected_seconds(self, duration_s):
+        """How long a trajectory of duration_s will really take at the current slider setting."""
+        return duration_s * 100.0 / max(self.speed_scaling, 1.0)
 
     def _on_joint_state(self, msg):
         self._latest = msg
@@ -131,7 +141,6 @@ class UR12eInterface(Node):
         _current_event["to_motion_s"] = round(to_motion, 2)
         print(f"[robot] motion started {to_motion:.2f} s after the command was entered (excluding confirmation)")
 
-        wrapped = _wait(goal_handle.get_result_async(), timeout_s=duration_s + 10.0)
         self._goal_handle = None
         if wrapped.status == GoalStatus.STATUS_CANCELED:
             return False
@@ -294,7 +303,8 @@ def move_joint(joint: int, degrees: float) -> str:
 
     # Safety check 3 and 4: fixed slow duration, and say what we are about to do.
     description = (f"move joint {joint} ({name}) by {degrees:+.1f} deg: "
-                   f"{current[name]:.1f} -> {target[name]:.1f} deg over {MOVE_DURATION_S} s")
+                   f"{current[name]:.1f} -> {target[name]:.1f} deg over {MOVE_DURATION_S} s"
+                   f" (about {robot.expected_seconds(MOVE_DURATION_S):.0f} s at {robot.speed_scaling:.0f} % speed)")
     print(f"[robot] {description}")
 
     # The operator gate.
@@ -325,7 +335,8 @@ def go_home() -> str:
     current = robot.joint_positions_deg()
     largest = max(abs(current[n] - h) for n, h in zip(JOINT_NAMES, HOME_DEG))
     duration = max(MOVE_DURATION_S, largest / MAX_SPEED_DEG_S)
-    description = f"go home: largest joint change {largest:.1f} deg over {duration:.1f} s"
+    description = (f"go home: largest joint change {largest:.1f} deg over {duration:.1f} s"
+                   f" (about {robot.expected_seconds(duration):.0f} s at {robot.speed_scaling:.0f} % speed)")
     print(f"[robot] {description}")
 
     if not _confirm(description):
