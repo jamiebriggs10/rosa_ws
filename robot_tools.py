@@ -141,6 +141,9 @@ class UR12eInterface(Node):
         _current_event["to_motion_s"] = round(to_motion, 2)
         print(f"[robot] motion started {to_motion:.2f} s after the command was entered (excluding confirmation)")
 
+        # The controller stretches the trajectory by the pendant's speed slider:
+        # at 10 % a 4 s move takes 40 s, so wait for the real duration.
+        wrapped = _wait(goal_handle.get_result_async(), timeout_s=self.expected_seconds(duration_s) + 10.0)
         self._goal_handle = None
         if wrapped.status == GoalStatus.STATUS_CANCELED:
             return False
