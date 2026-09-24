@@ -46,7 +46,19 @@
   header button:hover { border-color: var(--muted); }
 
   main { flex: 1; overflow-y: auto; padding: 16px; }
-  .column { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .wrap { max-width: 1180px; margin: 0 auto; display: flex; gap: 16px; align-items: flex-start; }
+  .column { flex: 1; min-width: 0; max-width: 720px; display: flex; flex-direction: column; gap: 10px; }
+  aside.view { width: 400px; flex: none; position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
+  #scene { height: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  #scene canvas { display: block; width: 100% !important; height: 100% !important; }
+  .readout { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+  .readout table { width: 100%; border-collapse: collapse; }
+  .readout td { padding: 2px 0; }
+  .readout td:last-child { text-align: right; }
+  .readout .name { color: var(--muted); }
+  .viewnote { font-size: 13px; color: var(--gate); min-height: 1.2em; }
+  .gate .preview { background: var(--panel); border-color: var(--gate); color: var(--gate); margin-left: 8px; }
+  @media (max-width: 1000px) { .wrap { flex-direction: column; } aside.view { width: 100%; position: static; } #scene { height: 280px; } }
 
   details.help { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
   details.help summary { cursor: pointer; font-weight: 500; }
@@ -71,7 +83,7 @@
   .msg.you { align-self: flex-end; background: var(--you-bg); }
   .msg.robot { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
   .events { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 13px; color: var(--muted); }
-  .events .done { color: var(--ok); } .events .refused, .events .cancelled, .events .stopped { color: var(--bad); }
+  .events .done { color: var(--ok); } .events .refused, .events .cancelled, .events .stopped, .events .no_motion { color: var(--bad); }
 
   .gate {
     align-self: stretch; background: var(--gate-bg); border: 2px solid var(--gate); border-radius: 10px; padding: 14px 16px;
@@ -117,7 +129,7 @@
   <button id="finish" type="button">Finish session</button>
 </header>
 
-<main><div class="column" id="column">
+<main><div class="wrap"><div class="column" id="column">
   <details class="help" id="help" open>
     <summary>What you can say</summary>
     <ul>
@@ -174,6 +186,19 @@
   <div id="messages"></div>
   <div id="gate"></div>
   <div id="thinking" class="thinking" hidden>Thinking…</div>
+</div>
+<aside class="view">
+  <div id="scene"></div>
+  <div class="readout"><table id="readout">
+    <tr><td class="name">1 Base</td><td class="mono">–</td></tr>
+    <tr><td class="name">2 Shoulder</td><td class="mono">–</td></tr>
+    <tr><td class="name">3 Elbow</td><td class="mono">–</td></tr>
+    <tr><td class="name">4 Wrist 1</td><td class="mono">–</td></tr>
+    <tr><td class="name">5 Wrist 2</td><td class="mono">–</td></tr>
+    <tr><td class="name">6 Wrist 3</td><td class="mono">–</td></tr>
+  </table></div>
+  <div class="viewnote" id="viewnote">Loading the robot model…</div>
+</aside>
 </div></main>
 
 <footer>
@@ -231,15 +256,26 @@ async function refresh() {
   const gate = $("gate");
   if (s.pending && s.pending.id !== pendingId) {
     pendingId = s.pending.id;
+    const canPreview = s.pending.preview && s.status.joints;
     gate.innerHTML = `<div class="gate"><div class="title">Confirm this move</div>
       <div class="what mono">${esc(s.pending.text)}</div>
-      <button class="confirm">Confirm and move</button><button class="cancel">Cancel</button></div>`;
+      <button class="confirm">Confirm and move</button><button class="cancel">Cancel</button>${canPreview ? '<button class="preview">Visualise</button>' : ''}</div>`;
     gate.querySelector(".confirm").onclick = () => post("/confirm", {id: pendingId, ok: true});
     gate.querySelector(".cancel").onclick = () => post("/confirm", {id: pendingId, ok: false});
+    if (canPreview) {
+      const from = s.status.joints.slice(), to = s.pending.preview.target_deg, secs = s.pending.preview.seconds;
+      gate.querySelector(".preview").onclick = () => window.visualise && window.visualise(from, to, secs);
+    }
     const m = s.pending.text.match(/joint (\d)/);
     pendingJoint = m ? m[1] : null;
     highlightJoint(pendingJoint);
-  } else if (!s.pending) { pendingId = null; gate.innerHTML = ""; if (pendingJoint) { pendingJoint = null; highlightJoint(null); } }
+  } else if (!s.pending) { pendingId = null; gate.innerHTML = ""; if (pendingJoint) { pendingJoint = null; highlightJoint(null); } if (window.hideGhost) window.hideGhost(); }
+
+  if (s.status.joints) {
+    if (window.showLive) window.showLive(s.status.joints);
+    const cells = document.querySelectorAll("#readout td.mono");
+    s.status.joints.forEach((d, i) => { cells[i].textContent = d.toFixed(1) + "°"; });
+  }
 
   $("thinking").hidden = !s.busy || !!s.pending;
   $("send").disabled = s.busy;
@@ -284,6 +320,78 @@ $("finish").onclick = async () => {
 };
 
 refresh(); setInterval(refresh, 1000);
+</script>
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "urdf-loader": "https://cdn.jsdelivr.net/npm/urdf-loader@0.12.1/src/URDFLoader.js"
+}}
+</script>
+<script type="module">
+// The 3D view: the real robot description, posed from the live joint angles.
+// A translucent orange copy ("ghost") plays a proposed move on request.
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import URDFLoader from "urdf-loader";
+
+const JOINTS = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"];
+const el = document.getElementById("scene"), note = document.getElementById("viewnote");
+const renderer = new THREE.WebGLRenderer({antialias: true});
+renderer.setPixelRatio(window.devicePixelRatio);
+el.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xffffff);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 20);
+camera.position.set(1.7, 1.3, 1.7);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.55, 0);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 0.9); sun.position.set(2, 3, 1); scene.add(sun);
+scene.add(new THREE.GridHelper(2, 20, 0xcfd6de, 0xe3e8ee));
+
+const loader = new URDFLoader();
+loader.packages = pkg => "/pkg/" + pkg;   // package://x/... becomes /pkg/x/... on this server
+let live = null, ghost = null, anim = null, pendingLive = null;
+
+function load(onDone) {
+  loader.load("/static/robot.urdf", robot => {
+    robot.rotation.x = -Math.PI / 2;          // ROS is Z-up, three.js is Y-up
+    scene.add(robot); onDone(robot);
+  }, undefined, err => { note.textContent = "Could not load the robot model: " + err; });
+}
+load(r => { live = r; note.textContent = ""; if (pendingLive) setPose(live, pendingLive); });
+load(r => {
+  ghost = r; ghost.visible = false;
+  ghost.traverse(o => { if (o.isMesh) o.material = new THREE.MeshStandardMaterial({color: 0xb25e00, transparent: true, opacity: 0.45, depthWrite: false}); });
+});
+
+function setPose(robot, degs) {
+  if (!robot || !degs) return;
+  JOINTS.forEach((n, i) => robot.setJointValue(n, degs[i] * Math.PI / 180));
+}
+function resize() {
+  const w = el.clientWidth, h = el.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(el); resize();
+
+window.showLive = degs => { pendingLive = degs; setPose(live, degs); };
+window.visualise = (from, to, seconds) => {
+  if (!ghost) return;
+  ghost.visible = true;
+  const T = 3000, t0 = performance.now();
+  anim = () => {
+    const k = Math.min(1, (performance.now() - t0) / T);
+    setPose(ghost, from.map((a, i) => a + (to[i] - a) * k));
+    if (k >= 1) anim = null;
+  };
+  note.textContent = `Orange is where the arm would end up. Preview sped up; the real move takes about ${seconds} s.`;
+};
+window.hideGhost = () => { if (ghost) ghost.visible = false; anim = null; note.textContent = ""; };
+
+(function tick() { if (anim) anim(); controls.update(); renderer.render(scene, camera); requestAnimationFrame(tick); })();
 </script>
 </body>
 </html>

@@ -20,6 +20,10 @@ JOINT_PREFIX = os.environ.get("JOINT_PREFIX", "")
 # The trajectory action server to send moves to.
 ACTION_NAME = os.environ.get("ACTION_NAME", "/scaled_joint_trajectory_controller/follow_joint_trajectory")
 
+# Where ROS packages' files (robot meshes) can be found, for the 3D view.
+PACKAGE_ROOTS = os.environ.get("PACKAGE_ROOTS",
+    "/opt/ros/humble/share:" + os.path.expanduser("~/UR_humble/install/{pkg}/share")).split(":")
+
 # How much text the model can hold in its head at once (tokens). ROSA's system
 # prompt plus the tool descriptions are long, so Ollama's default of 2048 is
 # too small and the model would silently forget its instructions.

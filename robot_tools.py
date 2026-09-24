@@ -214,7 +214,7 @@ def mark_command_time():
 # operator. The default asks y/n in the terminal; the web console swaps in
 # its own handler that shows a card with Confirm and Cancel.
 
-def _terminal_confirm(description):
+def _terminal_confirm(description, preview=None):
     answer = input(f"[confirm] {description}\nType y to go ahead: ").strip().lower()
     return answer == "y"
 
@@ -223,15 +223,17 @@ _confirm_handler = _terminal_confirm
 
 
 def set_confirm_handler(handler):
-    """handler(description: str) -> bool. True means go ahead."""
+    """handler(description: str, preview: dict | None) -> bool. True means go ahead.
+    preview carries {"target_deg": [six angles], "seconds": expected duration} so a
+    console can show the move before it happens."""
     global _confirm_handler
     _confirm_handler = handler
 
 
-def _confirm(description):
+def _confirm(description, preview=None):
     """Ask the operator, and note how long they took so timings stay honest."""
     t0 = time.time()
-    ok = _confirm_handler(description)
+    ok = _confirm_handler(description, preview)
     _current_event["confirm_wait_s"] = round(time.time() - t0, 2)
     return ok
 
@@ -252,9 +254,16 @@ def _record(tool, args, outcome, message):
 def status():
     """What the status strip needs: is the driver alive, is the program playing."""
     robot = _get_robot()
+    joints = None
+    if robot._latest is not None:
+        by_name = dict(zip(robot._latest.name, robot._latest.position))
+        if all(n in by_name for n in JOINT_NAMES):
+            joints = [round(math.degrees(by_name[n]), 2) for n in JOINT_NAMES]
     return {
         "driver": time.time() - robot.last_joint_state_time < 1.0,
         "program": bool(robot.program_running),
+        "speed": robot.speed_scaling,
+        "joints": joints,                       # six angles in degrees, controller order
     }
 
 
@@ -310,8 +319,10 @@ def move_joint(joint: int, degrees: float) -> str:
                    f" (about {robot.expected_seconds(MOVE_DURATION_S):.0f} s at {robot.speed_scaling:.0f} % speed)")
     print(f"[robot] {description}")
 
-    # The operator gate.
-    if not _confirm(description):
+    # The operator gate, with what the move would look like.
+    preview = {"target_deg": [target[n] for n in JOINT_NAMES],
+               "seconds": round(robot.expected_seconds(MOVE_DURATION_S), 1)}
+    if not _confirm(description, preview):
         return _record("move_joint", args, "cancelled", "Cancelled by the operator. Nothing was moved.")
 
     completed = robot.send_trajectory([target[n] for n in JOINT_NAMES], MOVE_DURATION_S)
@@ -342,7 +353,7 @@ def go_home() -> str:
                    f" (about {robot.expected_seconds(duration):.0f} s at {robot.speed_scaling:.0f} % speed)")
     print(f"[robot] {description}")
 
-    if not _confirm(description):
+    if not _confirm(description, {"target_deg": HOME_DEG, "seconds": round(robot.expected_seconds(duration), 1)}):
         return _record("go_home", {}, "cancelled", "Cancelled by the operator. Nothing was moved.")
 
     if not robot.send_trajectory(HOME_DEG, duration):

@@ -96,6 +96,27 @@ def test_cancel_and_stale_confirmation(client):
     assert client.post("/confirm", json={"id": pending["id"], "ok": True}).status_code == 409
 
 
+def test_confirm_card_carries_the_preview(client):
+    def move():
+        ok = robot_tools._confirm_handler("move joint 2", {"target_deg": [0, -60, 0, -90, 0, 0], "seconds": 40})
+        return "moved" if ok else "cancelled"
+    client.agent.action = move
+    client.post("/command", json={"text": "rotate joint 2 by 30"})
+    wait_until(lambda: client.get("/state").get_json()["pending"] is not None)
+    pending = client.get("/state").get_json()["pending"]
+    assert pending["preview"]["target_deg"][1] == -60
+    assert pending["preview"]["seconds"] == 40
+    client.post("/confirm", json={"id": pending["id"], "ok": False})
+    wait_until(lambda: not web_console.console.busy)
+
+
+def test_state_lists_joint_names_and_mesh_route_404s_for_unknown_package(client):
+    body = client.get("/state").get_json()
+    assert len(body["joint_names"]) == 6
+    assert client.get("/pkg/no_such_package/meshes/x.dae").status_code == 404
+    assert client.get("/pkg/ur_description/../../etc/passwd").status_code in (404, 400)
+
+
 def test_finish_writes_a_session_table(client, tmp_path):
     client.post("/command", json={"text": "hello"})
     wait_until(lambda: not web_console.console.busy)

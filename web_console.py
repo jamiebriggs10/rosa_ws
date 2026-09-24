@@ -44,10 +44,10 @@ class Console:
         robot_tools.set_confirm_handler(self.ask_operator)
 
     # -- the operator gate ---------------------------------------------------
-    def ask_operator(self, description):
+    def ask_operator(self, description, preview=None):
         """Called from the agent thread by a tool. Blocks until the page answers."""
         self._answered.clear()
-        self.pending = {"id": str(time.time()), "text": description}
+        self.pending = {"id": str(time.time()), "text": description, "preview": preview}
         answered = self._answered.wait(timeout=CONFIRM_TIMEOUT_S)
         self.pending = None
         return bool(answered and self._answer)
@@ -130,12 +130,24 @@ def ursim_up():
 
 
 def status():
-    s = {"ollama": ollama_up(), "ursim": ursim_up(), "driver": False, "program": False}
+    s = {"ollama": ollama_up(), "ursim": ursim_up(), "driver": False, "program": False, "joints": None}
     try:
         s.update(robot_tools.status())
     except Exception:
         pass
     return s
+
+
+def package_file(package, rel):
+    """Find a file inside a ROS package's share folder, for the robot meshes."""
+    if ".." in pathlib.PurePosixPath(rel).parts:      # no climbing out of the package
+        return None
+    for root in config.PACKAGE_ROOTS:
+        share = pathlib.Path(root.format(pkg=package)) / package
+        candidate = share / rel
+        if candidate.is_file():                     # may be a symlink into the source tree, fine
+            return candidate
+    return None
 
 
 # -- routes ------------------------------------------------------------------------
@@ -151,7 +163,17 @@ def index():
 @app.get("/state")
 def state():
     return jsonify(status=status(), busy=console.busy, pending=console.pending,
-                   messages=console.messages, model=config.MODEL, pendant="http://localhost:6080/vnc.html")
+                   messages=console.messages, model=config.MODEL, pendant="http://localhost:6080/vnc.html",
+                   joint_names=robot_tools.JOINT_NAMES)
+
+
+@app.get("/pkg/<package>/<path:rel>")
+def package_asset(package, rel):
+    """Serve robot mesh files referenced by the URDF as package://<package>/<path>."""
+    found = package_file(package, rel)
+    if found is None:
+        return jsonify(error=f"{package}/{rel} not found"), 404
+    return send_from_directory(found.parent, found.name)
 
 
 @app.post("/command")
