@@ -351,21 +351,31 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.2));
 const sun = new THREE.DirectionalLight(0xffffff, 0.9); sun.position.set(2, 3, 1); scene.add(sun);
 scene.add(new THREE.GridHelper(2, 20, 0xcfd6de, 0xe3e8ee));
 
-const loader = new URDFLoader();
-loader.packages = pkg => "/pkg/" + pkg;   // package://x/... becomes /pkg/x/... on this server
 let live = null, ghost = null, anim = null, pendingLive = null;
+const ghostMaterial = new THREE.MeshStandardMaterial({color: 0xe07b00, transparent: true, opacity: 0.5, depthWrite: false, roughness: 0.6});
 
-function load(onDone) {
+function makeLoader(material) {
+  const loader = new URDFLoader();
+  loader.packages = pkg => "/pkg/" + pkg;   // package://x/... becomes /pkg/x/... on this server
+  if (material) {
+    // Meshes arrive after the URDF itself, so recolour each one as it lands.
+    const original = loader.defaultMeshLoader.bind(loader);
+    loader.loadMeshCb = (path, manager, done) => original(path, manager, (mesh, err) => {
+      if (mesh) mesh.traverse(o => { if (o.isMesh) o.material = material; });
+      done(mesh, err);
+    });
+  }
+  return loader;
+}
+
+function load(loader, onDone) {
   loader.load("/static/robot.urdf", robot => {
     robot.rotation.x = -Math.PI / 2;          // ROS is Z-up, three.js is Y-up
     scene.add(robot); onDone(robot);
   }, undefined, err => { note.textContent = "Could not load the robot model: " + err; });
 }
-load(r => { live = r; note.textContent = ""; if (pendingLive) setPose(live, pendingLive); });
-load(r => {
-  ghost = r; ghost.visible = false;
-  ghost.traverse(o => { if (o.isMesh) o.material = new THREE.MeshStandardMaterial({color: 0xb25e00, transparent: true, opacity: 0.45, depthWrite: false}); });
-});
+load(makeLoader(null), r => { live = r; note.textContent = ""; if (pendingLive) setPose(live, pendingLive); });
+load(makeLoader(ghostMaterial), r => { ghost = r; ghost.visible = false; });
 
 function setPose(robot, degs) {
   if (!robot || !degs) return;
@@ -392,6 +402,12 @@ window.visualise = (from, to, seconds) => {
 window.hideGhost = () => { if (ghost) ghost.visible = false; anim = null; note.textContent = ""; };
 
 (function tick() { if (anim) anim(); controls.update(); renderer.render(scene, camera); requestAnimationFrame(tick); })();
+
+// Open the page as /?demo to see the preview ghost without a real pending move.
+if (location.search.includes("demo")) setTimeout(() => {
+  const from = pendingLive || [0, -90, 0, -90, 0, 0];
+  window.visualise(from, from.map((a, i) => a + [30, 20, -30, 0, 0, 40][i]), 40);
+}, 4000);
 </script>
 </body>
 </html>
