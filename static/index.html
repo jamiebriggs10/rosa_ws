@@ -404,10 +404,14 @@ window.hideGhost = () => { if (ghost) ghost.visible = false; anim = null; note.t
 (function tick() { if (anim) anim(); controls.update(); renderer.render(scene, camera); requestAnimationFrame(tick); })();
 
 // Open the page as /?demo to see the preview ghost without a real pending move.
-if (location.search.includes("demo")) setTimeout(() => {
-  const from = pendingLive || [0, -90, 0, -90, 0, 0];
-  window.visualise(from, from.map((a, i) => a + [30, 20, -30, 0, 0, 40][i]), 40);
-}, 4000);
+if (location.search.includes("demo")) {
+  const demo = setInterval(() => {
+    if (!ghost || !live) return;
+    clearInterval(demo);
+    const from = pendingLive || [0, -90, 0, -90, 0, 0];
+    window.visualise(from, from.map((a, i) => a + [30, 20, -30, 0, 0, 40][i]), 40);
+  }, 500);
+}
 </script>
 </body>
 </html>
