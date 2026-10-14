@@ -18,6 +18,9 @@ One Flask app, one page (static/index.html), and these JSON endpoints:
   POST /confirm  {"id": ..., "ok": true|false}  answer the operator gate
   POST /stop     cancel the motion in progress, without the model
   POST /finish   write the session file and return the table
+  GET  /capabilities         what the robot's system offers (discovery + the description file)
+  POST /capabilities/rescan  read the graph and the description file again
+  POST /ollama   {"url": ...}  test an Ollama address, save it, and list its models
 """
 import datetime
 import json
@@ -30,6 +33,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from langchain_core.messages import AIMessage, HumanMessage
 
 import config
+import generic_tools
 import robot_tools
 
 CONFIRM_TIMEOUT_S = 60
@@ -202,8 +206,18 @@ class Console:
             if self.busy:
                 return False
             self._agent = None
+        generic_tools.clear_path()
         self.messages.append({"who": "robot", "text": "New conversation: earlier messages are forgotten.",
                               "events": [], "total_s": 0})
+        return True
+
+    def set_ollama(self, url):
+        """Use another Ollama from the next command on. Returns False while a command runs."""
+        with self._lock:
+            if self.busy:
+                return False
+            config.save_settings({"ollama_url": url})
+            self._agent = None
         return True
 
     def set_think(self, on):
@@ -312,7 +326,29 @@ def status():
         s.update(robot_tools.status())
     except Exception:
         pass
+    s["hint"] = hint(s)
     return s
+
+
+def hint(s):
+    """One plain sentence about what is missing, for the first run. Empty when all is well."""
+    if not s["ollama"]:
+        return (f"Cannot reach Ollama at {config.OLLAMA_URL}. Open Settings below and enter the address of the "
+                "machine that runs Ollama (it must be set to listen on the network).")
+    if not s["joint_states"]:
+        return "No joint states yet: start the robot's driver (or simulator) and MoveIt on this computer."
+    if not s["moveit"]:
+        return "MoveIt is not answering: start the robot's MoveIt launch on this computer."
+    return ""
+
+
+def test_ollama(url):
+    """The models at an Ollama address, or raise with a plain reason."""
+    if not isinstance(url, str) or not url.startswith("http"):
+        raise ValueError("The address must start with http://, e.g. http://192.168.1.10:11434")
+    url = url.rstrip("/")
+    with urllib.request.urlopen(url + "/api/tags", timeout=3) as r:
+        return url, [m["name"] for m in json.load(r)["models"]]
 
 
 def package_file(package, rel):
@@ -342,7 +378,9 @@ def state():
                    busy_for_s=round(time.time() - console.busy_since, 1) if console.busy else 0,
                    messages=console.messages, model=config.MODEL, think=config.THINK,
                    pendant=config.PENDANT_URL, joint_list=config.JOINTS, saved=console.saved,
-                   limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED)
+                   limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED,
+                   shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
+                   frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME})
 
 
 @app.get("/pkg/<package>/<path:rel>")
@@ -392,6 +430,41 @@ def model():
     if not console.switch_model(name):
         return jsonify(error="Wait for the current command to finish first."), 409
     return jsonify(ok=True, current=config.MODEL)
+
+
+@app.get("/capabilities")
+def capabilities():
+    """What the robot's system offers, for the panel on the page."""
+    try:
+        rows = generic_tools.capability_rows()
+    except Exception as exc:
+        return jsonify(error=f"Cannot read the ROS graph: {exc}"), 502
+    names = {r["name"] for r in rows}
+    return jsonify(system=generic_tools.description().system, interfaces=rows,
+                   moveit=config.MOVE_ACTION in names and config.CARTESIAN_SERVICE in names,
+                   file=str(config.INTERFACES_FILE), allow_unlisted_writes=config.ALLOW_UNLISTED_WRITES)
+
+
+@app.post("/capabilities/rescan")
+def rescan():
+    try:
+        generic_tools.reload_description()
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    return capabilities()
+
+
+@app.post("/ollama")
+def set_ollama():
+    try:
+        url, models = test_ollama((request.json or {}).get("url", ""))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception as exc:
+        return jsonify(error=f"Cannot reach Ollama at {(request.json or {}).get('url', '')}: {exc}"), 502
+    if not console.set_ollama(url):
+        return jsonify(error="Wait for the current command to finish first."), 409
+    return jsonify(ok=True, url=url, models=models)
 
 
 @app.get("/cell")

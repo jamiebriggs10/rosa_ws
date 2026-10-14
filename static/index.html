@@ -46,6 +46,20 @@
   }
   .status span.up::before { background: var(--ok); }
   .status a { color: var(--action); }
+  .status span.hint { color: var(--gate); flex-basis: 100%; }
+  .status span.hint::before { display: none; }
+  details.help form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  details.help form input { flex: 1 1 220px; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  details.help form button, details.caps button { font: inherit; font-size: 13px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); cursor: pointer; }
+  details.help .note { color: var(--muted); font-size: 13px; }
+  details.caps table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+  details.caps th, details.caps td { text-align: left; vertical-align: top; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  details.caps th { color: var(--muted); font-weight: 500; }
+  details.caps .st { font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--bg); white-space: nowrap; }
+  details.caps .st.ready { background: #def3e6; color: var(--ok); }
+  details.caps .st.missing { background: #fbe4e2; color: var(--bad); }
+  details.caps .moves { color: var(--gate); font-weight: 600; white-space: nowrap; }
+  details.caps .type { color: var(--muted); }
   header button { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 6px;
     border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
   header button:hover { border-color: var(--muted); }
@@ -197,6 +211,7 @@
     <span id="s-moveit">MoveIt</span>
     <span id="s-joint_states">Joint states</span>
     <a id="pendant" target="_blank" hidden>Open pendant</a>
+    <span class="hint" id="hint" hidden></span>
   </div>
   <button id="reset" type="button" title="Make the model forget this conversation, e.g. after it gets confused">New conversation</button>
   <button id="finish" type="button">Finish session</button>
@@ -270,6 +285,23 @@
 </section>
 
 <main><div class="column" id="column">
+  <details class="help" id="settings-panel">
+    <summary>Settings</summary>
+    <form id="ollama-form">
+      <label for="ollama-url">Ollama address</label>
+      <input id="ollama-url" placeholder="http://192.168.1.10:11434" autocomplete="off">
+      <button type="submit">Save and test</button>
+      <span id="ollama-note" class="note"></span>
+    </form>
+    <p class="note">The machine that runs the language model. Ollama there must be set to listen on the network (in the Ollama app: Settings, "Expose Ollama to the network"; or start it with OLLAMA_HOST=0.0.0.0). Kept on this computer in ~/.config/rosa_ws/settings.json.</p>
+  </details>
+  <details class="help caps" id="caps-panel">
+    <summary>What this system offers (<span id="caps-count">…</span>)</summary>
+    <p id="caps-system" class="note"></p>
+    <div id="caps-body">Loading…</div>
+    <button id="caps-rescan" type="button">Rescan</button>
+    <p class="note">Read from ROS on this computer, with the meanings in <span id="caps-file" class="mono"></span>. Items marked <b>moves robot</b> are confirmed on a card first. Items not in that file are read-only.</p>
+  </details>
   <details class="help" id="saved-panel">
     <summary>Saved moves (<span id="saved-count">0</span>)</summary>
     <ul id="saved-list"></ul>
@@ -285,6 +317,8 @@
       <li><span class="cmd">draw a spiral flat in the x-y plane starting here, 3 turns, growing to 6 cm across</span> (curves are described by a formula the computer works out)</li>
       <li><span class="cmd">turn the base 20 degrees</span> (joints: base, shoulder, elbow, wrist 1, wrist 2, wrist 3)</li>
       <li><span class="cmd">go home</span></li>
+      <li><span class="cmd">what can this system do?</span> (its own services and topics, from the panel above)</li>
+      <li><span class="cmd">take a scan view</span>, <span class="cmd">pick the point at x 30, y -60, z 5</span>, <span class="cmd">read the raster path</span> (examples for an inspection cell; the names come from its description file)</li>
       <li><span class="cmd">stop</span>, or the red <b>Stop robot</b> button at the top, which does not wait for the model. <b>Stop thinking</b> (bottom) gives up on a command the model is still working on.</li>
     </ul>
     <p>Moves are straight lines planned by MoveIt. The safety layer refuses steps longer than 20 cm, paths that go more than 30 cm from the start, or turns over 30 degrees, and MoveIt refuses any path that would hit the cell. Before any motion a card shows the plan and asks you to confirm.</p>
@@ -307,7 +341,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let shown = 0, pendingId = null, helpAutoClosed = false;
+let shown = 0, pendingId = null, helpAutoClosed = false, shownPathKey = null, ollamaFilled = false;
 
 async function post(url, body) {
   const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
@@ -421,6 +455,15 @@ async function refresh() {
   } else if (!s.pending && pendingId) { pendingId = null; gate.innerHTML = ""; highlightJoint(null); if (window.hideGhost) window.hideGhost(); }
 
   if (!s.pending && !s.busy && window.clearRoute) window.clearRoute();   // keep the route up while the arm moves
+  // A path read from one of the system's topics stays drawn until a new one or a new conversation.
+  const pathKey = s.shown_path ? JSON.stringify(s.shown_path) : null;
+  if (pathKey !== shownPathKey && window.showPath) {
+    shownPathKey = pathKey;
+    if (pathKey) window.showPath(s.shown_path.points_cm, s.shown_path.topic); else window.clearPath();
+  }
+  $("hint").hidden = !s.status.hint; $("hint").textContent = s.status.hint || "";
+  if (!ollamaFilled && s.ollama_url) { $("ollama-url").value = s.ollama_url; ollamaFilled = true; }
+  if (s.status.hint && !s.status.ollama && !helpAutoClosed) $("settings-panel").open = true;
   if (window.showLive) window.showLive(s.status.joints);
   const tool = s.status.tool_cm || [null, null, null];
   ["x", "y", "z"].forEach((a, i) => { $("tool-" + a).textContent = tool[i] === null ? "–" : tool[i].toFixed(1); });
@@ -531,6 +574,39 @@ $("model").onchange = async e => {
 };
 loadModels();
 
+// Settings: another Ollama. Tested before it is saved, and the error shown here, not in a dialog.
+$("ollama-form").onsubmit = async e => {
+  e.preventDefault();
+  const note = $("ollama-note");
+  note.textContent = "Testing…";
+  const r = await fetch("/ollama", {method: "POST", headers: {"Content-Type": "application/json"},
+                                    body: JSON.stringify({url: $("ollama-url").value.trim()})});
+  const d = await r.json();
+  note.textContent = r.ok ? `Saved. Models there: ${d.models.join(", ")}` : d.error;
+  if (r.ok) { loadModels(); refresh(); }
+};
+
+// What this system offers: the discovered interfaces with their meanings.
+async function loadCapabilities() {
+  let r, d;
+  try { r = await fetch("/capabilities"); d = await r.json(); } catch { return; }
+  if (!r.ok) { $("caps-body").textContent = d.error; $("caps-count").textContent = "?"; return; }
+  $("caps-system").textContent = d.system || "No description file yet, so everything below is read-only. See the README for how to write one.";
+  $("caps-file").textContent = d.file;
+  $("caps-count").textContent = d.interfaces.length;
+  const order = {service: 0, topic: 1, action: 2, "": 3};
+  const rows = [...d.interfaces].sort((a, b) => (a.status === "ready" ? 0 : 1) - (b.status === "ready" ? 0 : 1) || order[a.kind] - order[b.kind] || a.name.localeCompare(b.name));
+  $("caps-body").innerHTML = `<table><tr><th>Interface</th><th>Means</th><th></th></tr>` + rows.map(i =>
+    `<tr><td><span class="mono">${esc(i.name)}</span><br><span class="type">${esc(i.kind)} ${esc(i.type)}</span></td>
+         <td>${esc(i.means)}${i.moves_robot ? ' <span class="moves">moves robot</span>' : ""}</td>
+         <td><span class="st ${i.status}">${i.status === "undescribed" ? "read-only" : i.status}</span></td></tr>`).join("") + "</table>";
+}
+$("caps-rescan").onclick = async () => {
+  const r = await fetch("/capabilities/rescan", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+  if (!r.ok) $("caps-body").textContent = (await r.json()).error; else loadCapabilities();
+};
+loadCapabilities();
+
 refresh(); setInterval(refresh, 1000);
 </script>
 <script type="importmap">
@@ -543,6 +619,10 @@ refresh(); setInterval(refresh, 1000);
 </script>
 <script type="module">
 // The 3D view: the real robot description, posed from the live joint angles.
+// The frame names come from config.py through /state, so nothing here names a robot.
+const frames = {base: "base", tool: "tool0"};
+fetch("/state").then(r => r.json()).then(s => { if (s.frames) Object.assign(frames, s.frames); }).catch(() => {});
+const baseLink = () => live.links[frames.base] || live;
 // A translucent orange copy ("ghost") plays MoveIt's planned path on request.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -596,7 +676,7 @@ function load(loader, onDone) {
 }
 load(makeLoader(null), r => {
   live = r; note.textContent = "";
-  live.links.base.add(makeAxes(0.3));      // the frame every x, y, z on this page is measured in
+  baseLink().add(makeAxes(0.3));      // the frame every x, y, z on this page is measured in
   loadCell();
   if (pendingLive) setPose(live, pendingLive);
 });
@@ -656,7 +736,7 @@ const keyScene = new THREE.Scene(), keyCamera = new THREE.OrthographicCamera(-2.
 keyScene.add(key);
 const KEY_PX = 150, baseTurn = new THREE.Quaternion();
 function renderKey() {
-  if (live) { live.links.base.getWorldQuaternion(baseTurn); key.quaternion.copy(baseTurn); }
+  if (live) { baseLink().getWorldQuaternion(baseTurn); key.quaternion.copy(baseTurn); }
   keyCamera.position.copy(camera.position).sub(controls.target).setLength(4);
   keyCamera.up.copy(camera.up); keyCamera.lookAt(0, 0, 0);
   renderer.autoClear = false; renderer.clearDepth();
@@ -756,15 +836,15 @@ window.showRoute = (names, path, pointsCm) => {
   for (const frame of path) {                 // pose the hidden ghost at each step and note where its tool is
     setPose(ghost, Object.fromEntries(names.map((n, i) => [n, frame[i]])));
     ghost.updateMatrixWorld(true);
-    line.push(ghost.links.tool0.getWorldPosition(new THREE.Vector3()));
+    line.push(ghost.links[frames.tool].getWorldPosition(new THREE.Vector3()));
   }
   route.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(line),
                            new THREE.LineBasicMaterial({color: ROUTE, depthTest: false})));
-  live.links.base.updateMatrixWorld(true);
+  baseLink().updateMatrixWorld(true);
   (pointsCm || []).forEach((p, i) => {
     const colour = i ? ROUTE : 0x1b2430;
     const dot = new THREE.Mesh(new THREE.SphereGeometry(0.007), new THREE.MeshBasicMaterial({color: colour, depthTest: false}));
-    dot.position.set(p[0] / 100, p[1] / 100, p[2] / 100).applyMatrix4(live.links.base.matrixWorld);   // base frame to the scene
+    dot.position.set(p[0] / 100, p[1] / 100, p[2] / 100).applyMatrix4(baseLink().matrixWorld);   // base frame to the scene
     const tag = letter(i ? String(i) : "S", i ? "#7c3aed" : "#1b2430");
     tag.position.copy(dot.position).add(new THREE.Vector3(0, 0.03, 0));
     tag.scale.setScalar(0.05);
@@ -777,7 +857,37 @@ window.showRoute = (names, path, pointsCm) => {
 window.clearRoute = () => {
   if (!route) return;
   scene.remove(route); route = null; dirty = true;
-  if (!anim) note.textContent = "";
+  if (!anim && !pathGroup) note.textContent = "";
+};
+
+// A path read from one of the system's own topics (for example an inspection raster),
+// drawn in teal in the base frame. S is its start, E its end.
+const PATH = 0x0f6e78;
+let pathGroup = null;
+window.showPath = (pointsCm, label) => {
+  window.clearPath();
+  if (!live || !pointsCm || !pointsCm.length) return;
+  baseLink().updateMatrixWorld(true);
+  const pts = pointsCm.map(p => new THREE.Vector3(p[0] / 100, p[1] / 100, p[2] / 100).applyMatrix4(baseLink().matrixWorld));
+  pathGroup = new THREE.Group();
+  pathGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+                               new THREE.LineBasicMaterial({color: PATH, depthTest: false})));
+  [[pts[0], "S"], [pts[pts.length - 1], "E"]].forEach(([p, text]) => {
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.007), new THREE.MeshBasicMaterial({color: PATH, depthTest: false}));
+    dot.position.copy(p);
+    const tag = letter(text, "#0f6e78");
+    tag.position.copy(p).add(new THREE.Vector3(0, 0.03, 0));
+    tag.scale.setScalar(0.05);
+    pathGroup.add(dot, tag);
+  });
+  scene.add(pathGroup);
+  note.textContent = `Teal: ${label}, ${pointsCm.length} points (S start, E end).`;
+  dirty = true;
+};
+window.clearPath = () => {
+  if (!pathGroup) return;
+  scene.remove(pathGroup); pathGroup = null; dirty = true;
+  if (!route && !anim) note.textContent = "";
 };
 
 // Where the arm may not go: MoveIt's model of the cell (walls, table, keep-out zones),

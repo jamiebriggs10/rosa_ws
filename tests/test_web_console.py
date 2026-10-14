@@ -32,7 +32,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(web_console.config, "MODEL", web_console.config.MODEL)
     monkeypatch.setattr(web_console.config, "THINK", web_console.config.THINK)
     web_console.console = web_console.Console(lambda: agent)
-    monkeypatch.setattr(web_console, "status", lambda: {"ollama": True, "moveit": False, "joint_states": False, "joints": {}, "tool_cm": None})
+    monkeypatch.setattr(web_console, "status", lambda: {"ollama": True, "moveit": False, "joint_states": False, "joints": {}, "tool_cm": None, "hint": ""})
     web_console.app.config["TESTING"] = True
     c = web_console.app.test_client()
     c.agent = agent
@@ -243,3 +243,44 @@ def test_limits_change_within_their_ceilings_and_are_announced(client, monkeypat
     assert client.post("/limits", json={"MAX_PATH_REACH_CM": 500}).status_code == 400      # past the ceiling
     assert client.post("/limits", json={"SPEED": 1.0}).status_code == 400                  # not changeable here
     assert client.post("/limits", json={"MAX_STEP_CM": 0}).status_code == 400
+
+
+# -- settings and capabilities -------------------------------------------------
+
+def test_unreachable_ollama_is_reported_and_not_saved(client, monkeypatch):
+    monkeypatch.setattr(web_console.config, "OLLAMA_URL", "http://localhost:11434")
+    r = client.post("/ollama", json={"url": "http://127.0.0.1:9"})     # a closed port
+    assert r.status_code == 502 and "Cannot reach Ollama" in r.get_json()["error"]
+    assert web_console.config.OLLAMA_URL == "http://localhost:11434"
+    r = client.post("/ollama", json={"url": "nonsense"})
+    assert r.status_code == 400
+
+
+def test_reachable_ollama_is_saved(client, monkeypatch):
+    monkeypatch.setattr(web_console, "test_ollama", lambda url: ("http://10.0.0.5:11434", ["llama3.1:8b"]))
+    r = client.post("/ollama", json={"url": "http://10.0.0.5:11434/"})
+    assert r.status_code == 200 and r.get_json()["models"] == ["llama3.1:8b"]
+    assert web_console.config.OLLAMA_URL == "http://10.0.0.5:11434"
+    assert client.get("/state").get_json()["ollama_url"] == "http://10.0.0.5:11434"
+
+
+def test_capabilities_have_the_shape_the_panel_needs(client, monkeypatch):
+    rows = [{"name": "/multiview_scan/capture", "kind": "service", "type": "std_srvs/srv/Trigger",
+             "means": "Take one view", "moves_robot": False, "status": "ready"}]
+    monkeypatch.setattr(web_console.generic_tools, "capability_rows", lambda: rows)
+    body = client.get("/capabilities").get_json()
+    assert body["interfaces"] == rows and body["moveit"] is False and "file" in body
+
+
+def test_capabilities_report_a_graph_problem(client, monkeypatch):
+    def boom():
+        raise RuntimeError("no ROS")
+    monkeypatch.setattr(web_console.generic_tools, "capability_rows", boom)
+    assert client.get("/capabilities").status_code == 502
+
+
+def test_state_carries_the_last_path(client, monkeypatch):
+    monkeypatch.setattr(web_console.generic_tools, "last_path", {"topic": "/p", "points_cm": [[0, 0, 0], [1, 2, 3]]})
+    assert client.get("/state").get_json()["shown_path"]["topic"] == "/p"
+    client.post("/reset")
+    assert client.get("/state").get_json()["shown_path"] is None
