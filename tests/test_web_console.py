@@ -28,7 +28,7 @@ def client(monkeypatch, tmp_path):
     agent = FakeAgent()
     web_console.SESSIONS_DIR = tmp_path
     monkeypatch.setattr(web_console, "SAVED_FILE", tmp_path / "saved.json")   # never touch the real saved moves
-    monkeypatch.setattr(web_console, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(web_console.config, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(web_console.config, "MODEL", web_console.config.MODEL)
     monkeypatch.setattr(web_console.config, "THINK", web_console.config.THINK)
     web_console.console = web_console.Console(lambda: agent)

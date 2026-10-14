@@ -35,7 +35,6 @@ import robot_tools
 CONFIRM_TIMEOUT_S = 60
 SESSIONS_DIR = pathlib.Path(__file__).parent / "sessions"
 SAVED_FILE = SESSIONS_DIR / "saved_moves.json"
-SETTINGS_FILE = SESSIONS_DIR / "console_settings.json"   # the last model and thinking choice, kept over restarts
 MOVE_TOOLS = {"move_by", "move_to", "move_path", "move_formula", "move_joint", "go_home"}   # the tools that can be re-run
 
 app = Flask(__name__, static_folder="static")
@@ -59,14 +58,6 @@ class Console:
         self._answered = threading.Event()
         self.started = datetime.datetime.now()
         self.saved = self._load_saved()       # moves kept for re-running, survive restarts
-        try:
-            settings = json.loads(SETTINGS_FILE.read_text())
-            config.MODEL, config.THINK = settings["model"], settings["think"]
-            for name, value in settings.get("limits", {}).items():
-                if name in config.LIMIT_CEILINGS and 0 < value <= config.LIMIT_CEILINGS[name]:
-                    setattr(config, name, value)
-        except (OSError, ValueError, KeyError):
-            pass
         robot_tools.set_confirm_handler(self.ask_operator)
 
     # -- the operator gate ---------------------------------------------------
@@ -181,8 +172,7 @@ class Console:
         return True
 
     def _remember_settings(self):
-        SESSIONS_DIR.mkdir(exist_ok=True)
-        SETTINGS_FILE.write_text(json.dumps({"model": config.MODEL, "think": config.THINK, "limits": limits()}))
+        config.save_settings({"model": config.MODEL, "think": config.THINK, "limits": limits()})
 
     def set_limits(self, changes):
         """Change safety limits, each within its ceiling. Returns an error message, or None."""
@@ -329,12 +319,11 @@ def package_file(package, rel):
     """Find a file inside a ROS package's share folder, for the robot meshes."""
     if ".." in pathlib.PurePosixPath(rel).parts:      # no climbing out of the package
         return None
-    for root in config.PACKAGE_ROOTS:
-        share = pathlib.Path(root.format(pkg=package)) / package
-        candidate = share / rel
-        if candidate.is_file():                     # may be a symlink into the source tree, fine
-            return candidate
-    return None
+    share = config.package_share(package)
+    if share is None:
+        return None
+    candidate = share / rel
+    return candidate if candidate.is_file() else None   # may be a symlink into the source tree, fine
 
 
 # -- routes ------------------------------------------------------------------------

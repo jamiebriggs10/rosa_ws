@@ -3,13 +3,34 @@
 To use the agent with a different MoveIt robot, edit the MoveIt section below.
 Nothing else in the code names a particular robot.
 """
+import json
 import os
+import pathlib
+
+# --- The settings file ---------------------------------------------------------
+# Everything an operator changes from the console (Ollama address, model, safety
+# limits) is kept here, so it survives restarts and the code never needs editing.
+# The values below are the defaults; apply_settings() at the bottom of this file
+# overrides them with whatever the file holds.
+
+SETTINGS_FILE = pathlib.Path(os.environ.get("ROSA_SETTINGS", "~/.config/rosa_ws/settings.json")).expanduser()
+
+# The optional description of the robot system's own interfaces (see interfaces.py).
+INTERFACES_FILE = SETTINGS_FILE.with_name("interfaces.yaml")
+
+# Whether the model may write to interfaces that the description file does not list.
+# Off by default: an unknown service might move the robot.
+ALLOW_UNLISTED_WRITES = False
+
+# setup.bash files of the robot's own workspaces, sourced by the installed service so
+# its packages (robot meshes, message types) can be found. Written by install.sh.
+WORKSPACES = []
 
 # --- The language model -------------------------------------------------------
 
-# Where Ollama is running. The Mac's LAN address, port 11434 is Ollama's default.
-MAC_IP = os.environ.get("MAC_IP", "192.168.1.148")
-OLLAMA_URL = os.environ.get("OLLAMA_URL", f"http://{MAC_IP}:11434")
+# Where Ollama is running: the address of the machine with the model, port 11434 is
+# Ollama's default. Entered on the console's settings panel; this is only the default.
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 
 # Which local model to use. Must support tool calling.
 MODEL = os.environ.get("ROSA_MODEL", "llama3.1:8b")
@@ -88,6 +109,61 @@ LIMIT_CEILINGS = {"MAX_STEP_CM": 50.0, "MAX_PATH_REACH_CM": 80.0, "MAX_JOINT_DEG
 # (tunnelled to the Mac by scripts/sim-up). Empty hides the link.
 PENDANT_URL = os.environ.get("PENDANT_URL", "http://localhost:6080/vnc.html")
 
-# Where ROS packages' files (robot meshes) can be found, for the 3D view.
-PACKAGE_ROOTS = os.environ.get("PACKAGE_ROOTS",
-    "/opt/ros/humble/share:" + os.path.expanduser("~/UR_humble/install/{pkg}/share")).split(":")
+
+
+def package_share(package):
+    """The share folder of a ROS package (where meshes and config live), or None.
+    ROS keeps an index of every package in the sourced workspaces; we ask it rather
+    than guessing paths, so any robot's description package can be found."""
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        return pathlib.Path(get_package_share_directory(package))
+    except Exception:
+        return None
+
+
+# --- Reading and writing the settings file ----------------------------------------
+
+def load_settings(path=None):
+    """The settings file as a dict, or {} if it is missing or unreadable."""
+    try:
+        data = json.loads((path or SETTINGS_FILE).read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def apply_settings(settings):
+    """Copy valid values from a settings dict onto this module. Bad values are ignored,
+    so a damaged file can never stop the console from starting."""
+    global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES
+    url = settings.get("ollama_url")
+    if isinstance(url, str) and url.startswith("http"):
+        OLLAMA_URL = url.rstrip("/")
+    if isinstance(settings.get("model"), str) and settings["model"]:
+        MODEL = settings["model"]
+    if isinstance(settings.get("think"), bool):
+        THINK = settings["think"]
+    if isinstance(settings.get("allow_unlisted_writes"), bool):
+        ALLOW_UNLISTED_WRITES = settings["allow_unlisted_writes"]
+    if isinstance(settings.get("interfaces_file"), str) and settings["interfaces_file"]:
+        INTERFACES_FILE = pathlib.Path(settings["interfaces_file"]).expanduser()
+    if isinstance(settings.get("workspaces"), list):
+        WORKSPACES = [w for w in settings["workspaces"] if isinstance(w, str)]
+    for name, value in (settings.get("limits") or {}).items():
+        if name in LIMIT_CEILINGS and isinstance(value, (int, float)) and not isinstance(value, bool) \
+                and 0 < value <= LIMIT_CEILINGS[name]:
+            globals()[name] = int(value) if name == "MAX_PATH_STEPS" else float(value)
+
+
+def save_settings(changes, path=None):
+    """Merge changes into the settings file and apply them. Returns the merged dict."""
+    path = path or SETTINGS_FILE
+    merged = {**load_settings(path), **changes}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(merged, indent=2) + "\n")
+    apply_settings(merged)
+    return merged
+
+
+apply_settings(load_settings())
