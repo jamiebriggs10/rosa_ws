@@ -1,0 +1,36 @@
+# Description of the Strathclyde/BAE UR12e inspection cell (github.com/UoS-EEE-FENDER/UR_humble)
+# for the natural-language agent. Copy to ~/.config/rosa_ws/interfaces.yaml.
+#
+# Each entry gives an interface a plain-English meaning for the model and the operator,
+# and says whether using it can move the robot. Anything that can move the robot goes
+# through the operator's confirm card. Interfaces not listed here are read-only.
+# Names are as of UR_humble commit 25e3f49 (25 September 2026).
+
+system: UR_humble inspection cell. A UR12e with a Zivid 3D camera and an eddy-current probe. The workflow is scan the part from several views, pick a flat patch on the scan, preview a raster over it, then touch the probe down and scan the raster under force control.
+
+interfaces:
+  /multiview_scan/capture:
+    means: Take one 3D view with the camera from where the arm is now and add it to the scan. Fails if the camera is not running.
+    moves_robot: false
+  /multiview_scan/reset:
+    means: Throw away the scan so far and start again.
+    moves_robot: false
+  /multiview_scan/fused:
+    means: The scan so far, as a point cloud, in the world frame.
+  /multiview_scan/next_best_targets:
+    means: Camera poses the scanner suggests for the next views.
+  /clicked_point:
+    means: Pick a point on the scanned surface. The system fits a flat patch around it and lays a raster over the patch. This only selects; nothing moves.
+    moves_robot: false
+  /inspection/selected_surface:
+    means: The flat patch that was picked, as a point cloud.
+  /inspection/raster_path:
+    means: The raster path over the picked patch, in the world frame.
+  /inspection/raster_plan_valid:
+    means: Whether MoveIt could plan the approach and raster. True means the preview is ready.
+  /touchdown_test/execute:
+    means: Run the previewed touchdown. The arm approaches the picked point, lowers the probe onto the surface under force control, holds, and retracts.
+    moves_robot: true
+  /touchdown_test/execute_raster:
+    means: Touch down at the start of the raster and scan the whole raster with the probe pressed on the surface.
+    moves_robot: true
