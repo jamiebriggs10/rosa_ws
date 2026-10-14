@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UR12e console</title>
+<title>Robot console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -19,6 +19,9 @@
     --gate: #b25e00;
     --gate-bg: #fff4e5;
     --you-bg: #e3ebf7;
+    --axis-x: #d03b3b;    /* the usual CAD colours: x red, y green, z blue */
+    --axis-y: #2e9d4f;
+    --axis-z: #2f6fdb;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -34,6 +37,8 @@
     padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center;
   }
   header h1 { font-size: 17px; font-weight: 600; margin: 0 auto 0 0; }
+  header label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  header select { font: inherit; color: var(--ink); padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
   .status { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
   .status span::before {
     content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 50%;
@@ -45,20 +50,73 @@
     border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
   header button:hover { border-color: var(--muted); }
 
-  main { flex: 1; overflow-y: auto; padding: 16px; }
-  .wrap { max-width: 1180px; margin: 0 auto; display: flex; gap: 16px; align-items: flex-start; }
-  .column { flex: 1; min-width: 0; max-width: 720px; display: flex; flex-direction: column; gap: 10px; }
-  aside.view { width: 400px; flex: none; position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; }
-  #scene { height: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  /* The robot panel: always on screen, above the conversation */
+  .robot { flex: none; display: grid; grid-template-columns: minmax(300px, 5fr) 7fr; gap: 12px;
+    padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .view { display: flex; flex-direction: column; overflow: hidden; position: relative; }
+  .viewtools { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; }
+  .viewtools button { font: inherit; font-size: 12px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 6px;
+    background: rgba(255, 255, 255, .92); color: var(--ink); cursor: pointer; }
+  .viewtools button:hover { border-color: var(--muted); }
+  .viewtools button:focus-visible { outline: 2px solid var(--action); outline-offset: 1px; }
+  #scene { height: 300px; }
   #scene canvas { display: block; width: 100% !important; height: 100% !important; }
-  .readout { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 13px; }
-  .readout table { width: 100%; border-collapse: collapse; }
-  .readout td { padding: 2px 0; }
-  .readout td:last-child { text-align: right; }
-  .readout .name { color: var(--muted); }
-  .viewnote { font-size: 13px; color: var(--gate); min-height: 1.2em; }
+  .viewnote { font-size: 13px; color: var(--gate); padding: 0 12px; line-height: 1.8em; border-top: 1px solid var(--line); }
+  .viewnote:empty { display: none; }
+  .stats { display: grid; grid-template-rows: auto 1fr; gap: 12px; }
+  .stats h2 { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+  .stats h2 span { font-weight: 400; color: var(--muted); margin-left: 8px; }
+  .position, .joints { padding: 12px 16px; }
+  .xyz { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .xyz div { background: var(--bg); border-radius: 6px; padding: 6px 12px; display: flex; align-items: baseline; gap: 10px; }
+  .xyz .axis { font-weight: 600; }
+  #ax-x { color: var(--axis-x); } #ax-y { color: var(--axis-y); } #ax-z { color: var(--axis-z); }
+  .xyz .val { font-size: 20px; margin-left: auto; }
+  .jointgrid { display: flex; gap: 20px; align-items: center; }
+  .jointgrid svg { width: 170px; height: auto; flex: none; }
+  .jointgrid ol { list-style: none; margin: 0; padding: 0; flex: 1; font-size: 14px; }
+  .jointgrid li { display: flex; align-items: center; gap: 10px; padding: 3px 8px; border-radius: 6px; }
+  .jointgrid li .n { width: 20px; height: 20px; border-radius: 50%; background: var(--action); color: #fff;
+    font-size: 11px; font-weight: 600; display: grid; place-items: center; flex: none; }
+  .jointgrid li .deg { margin-left: auto; }
+  .jointgrid li.hot { background: var(--gate-bg); color: var(--gate); }
+  .jointgrid li.hot .n { background: var(--gate); }
+  .arm { fill: #a9b6c4; stroke: #5d6b79; stroke-width: 1.5; }
+  .joint { fill: var(--action); stroke: #fff; stroke-width: 2; }
+  .joint.hot { fill: var(--gate); }
+  .jlabel { font: 600 11px "IBM Plex Sans", sans-serif; fill: #fff; text-anchor: middle; pointer-events: none; }
+  .axisline { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 2; }
+
+  /* The conversation scrolls underneath */
+  /* The robot panel and the chat scroll together; the bottom bar stays put. */
+  .scroll { flex: 1; overflow-y: auto; }
+  main { padding: 16px; }
+
+  /* The safety limits, always on show under the header */
+  .limits { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line); font-size: 13px; }
+  .limits .label { font-weight: 600; margin-right: 4px; }
+  .limits .chip { background: var(--bg); border-radius: 999px; padding: 2px 10px; }
+  .limits .chip b { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; }
+  .limits button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--ink); cursor: pointer; }
+  .limits form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; flex-basis: 100%; padding-top: 6px; }
+  .limits form[hidden] { display: none; }
+  .limits form label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .limits form input { width: 70px; font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  .limits form .note { color: var(--muted); flex-basis: 100%; }
+  .column { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
   .gate .preview { background: var(--panel); border-color: var(--gate); color: var(--gate); margin-left: 8px; }
-  @media (max-width: 1000px) { .wrap { flex-direction: column; } aside.view { width: 100%; position: static; } #scene { height: 280px; } }
+
+  @media (max-width: 960px) {
+    .robot { grid-template-columns: 1fr; }
+    #scene { height: 260px; }
+  }
+  @media (max-width: 560px) {
+    .jointgrid svg { display: none; }
+    .xyz .val { font-size: 16px; }
+  }
 
   details.help { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
   details.help summary { cursor: pointer; font-weight: 500; }
@@ -67,23 +125,12 @@
   details.help .cmd { color: var(--action); cursor: pointer; }
   details.help .cmd:hover { text-decoration: underline; }
 
-  .joints { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
-  .joints svg { width: 230px; height: auto; flex: none; }
-  .joints ol { margin: 0; padding-left: 22px; flex: 1; min-width: 220px; font-size: 14px; }
-  .joints li { margin: 3px 0; cursor: default; }
-  .joints li span { color: var(--muted); }
-  .joints li:hover, .joints li.hot { color: var(--action); }
-  .arm { fill: #a9b6c4; stroke: #5d6b79; stroke-width: 1.5; }
-  .joint { fill: var(--action); stroke: #fff; stroke-width: 2; }
-  .joint.hot { fill: var(--gate); }
-  .jlabel { font: 600 11px "IBM Plex Sans", sans-serif; fill: #fff; text-anchor: middle; pointer-events: none; }
-  .axis { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 3 2; }
-
+  #messages { display: flex; flex-direction: column; gap: 10px; }
   .msg { max-width: 85%; padding: 9px 13px; border-radius: 10px; white-space: pre-wrap; }
   .msg.you { align-self: flex-end; background: var(--you-bg); }
   .msg.robot { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
   .events { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 13px; color: var(--muted); }
-  .events .done { color: var(--ok); } .events .refused, .events .cancelled, .events .stopped, .events .no_motion { color: var(--bad); }
+  .events .done { color: var(--ok); } .events .refused, .events .cancelled, .events .stopped, .events .no_motion, .events .failed { color: var(--bad); }
 
   .gate {
     align-self: stretch; background: var(--gate-bg); border: 2px solid var(--gate); border-radius: 10px; padding: 14px 16px;
@@ -94,18 +141,42 @@
   .gate .confirm { background: var(--gate); color: #fff; }
   .gate .cancel { background: var(--panel); border-color: var(--line); margin-left: 8px; }
 
-  .thinking { color: var(--muted); font-size: 13px; }
+  .thinking { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 10px; }
+  .thinking[hidden] { display: none; }
+  .thinking .time { font-family: "IBM Plex Mono", ui-monospace, monospace; color: var(--ink); }
+  .dots { display: inline-flex; gap: 4px; }
+  .dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--action); opacity: .3; }
+  @media (prefers-reduced-motion: no-preference) {
+    .dots i { animation: pulse 1.2s infinite ease-in-out; }
+    .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
+  }
+  @keyframes pulse { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+  .again { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .again button, #saved-list button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .again button:hover, #saved-list button:hover { border-color: var(--muted); }
+  #saved-list { list-style: none; padding: 0; margin: 8px 0 0; }
+  #saved-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  #saved-list li .what { flex: 1; min-width: 200px; }
+  #saved-list li .what span { color: var(--muted); font-size: 13px; }
   .empty { color: var(--muted); text-align: center; padding: 30px 0; }
 
-  footer { background: var(--panel); border-top: 1px solid var(--line); padding: 12px 16px; }
+  /* The bottom bar is always on screen, with the confirm card in it,
+     so Confirm is in reach while you scroll up to watch the preview. */
+  footer { flex: none; background: var(--panel); border-top: 1px solid var(--line);
+    padding: 12px 16px; box-shadow: 0 -4px 12px rgba(27, 36, 48, .08); }
+  footer .gate, footer .thinking { max-width: 720px; margin: 0 auto 10px; }
   footer form { max-width: 720px; margin: 0 auto; display: flex; gap: 8px; }
   footer input { flex: 1; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
   footer input:focus { outline: 2px solid var(--action); outline-offset: 1px; }
   footer button { font: inherit; padding: 10px 16px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
   #send { background: var(--action); color: #fff; }
   #send:disabled { opacity: .5; cursor: default; }
-  #stop { background: var(--panel); color: var(--bad); border-color: var(--bad); font-weight: 600; }
-  #stop:hover { background: var(--bad); color: #fff; }
+  #cancel { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  #cancel:disabled { opacity: .45; cursor: default; }
+  /* Stop robot: always in reach, in the header, and unmistakable */
+  header #stop-robot { background: var(--bad); color: #fff; border-color: var(--bad); font-weight: 600; padding: 6px 14px; }
+  header #stop-robot:hover { background: #8f1c13; }
 
   dialog { border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; max-width: 900px; width: 92vw; font: inherit; }
   dialog table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0; }
@@ -118,30 +189,51 @@
 </head>
 <body>
 <header>
-  <h1>UR12e console</h1>
+  <h1>Robot console</h1>
+  <label>Model <select id="model"><option>loading…</option></select></label>
+  <label title="Thinking models (like qwen3) can reason before answering: sometimes better, much slower"><input type="checkbox" id="think"> Let the model think</label>
   <div class="status" id="status">
     <span id="s-ollama">Model</span>
-    <span id="s-ursim">Simulator</span>
-    <span id="s-driver">Driver</span>
-    <span id="s-program">Program playing</span>
-    <a id="pendant" href="http://localhost:6080/vnc.html" target="_blank">Open pendant</a>
+    <span id="s-moveit">MoveIt</span>
+    <span id="s-joint_states">Joint states</span>
+    <a id="pendant" target="_blank" hidden>Open pendant</a>
   </div>
+  <button id="reset" type="button" title="Make the model forget this conversation, e.g. after it gets confused">New conversation</button>
   <button id="finish" type="button">Finish session</button>
+  <button id="stop-robot" type="button" title="Halt the arm now, without waiting for the model">Stop robot</button>
 </header>
 
-<main><div class="wrap"><div class="column" id="column">
-  <details class="help" id="help" open>
-    <summary>What you can say</summary>
-    <ul>
-      <li><span class="cmd">where is the arm right now?</span></li>
-      <li><span class="cmd">rotate joint 1 by 10 degrees</span> (joints 1 to 6: base, shoulder, elbow, wrist 1, wrist 2, wrist 3)</li>
-      <li><span class="cmd">now move it back</span></li>
-      <li><span class="cmd">turn the wrist 15 degrees</span></li>
-      <li><span class="cmd">go home</span> (arm straight up)</li>
-      <li><span class="cmd">stop</span>, or the Stop button, which does not wait for the model</li>
-    </ul>
-    <div class="joints">
-      <svg viewBox="0 0 230 250" role="img" aria-label="Side view of the UR12e arm with the six joints numbered">
+<div class="limits" id="limits">
+  <span class="label">Safety limits</span>
+  <span id="limits-chips"></span>
+  <button id="limits-edit" type="button">Change</button>
+  <form id="limits-form" hidden></form>
+</div>
+
+<div class="scroll" id="scroll">
+<section class="robot" aria-label="The robot">
+  <div class="panel view">
+    <div id="scene"></div>
+    <div class="viewtools">
+      <button id="view-home" type="button" title="Go back to your home view">⌂ Home</button>
+      <button id="view-sethome" type="button" title="Make the current view your home view">Set home</button>
+      <button id="view-cell" type="button" aria-pressed="true" title="Show or hide where the arm may not go (MoveIt's model of the cell)">Hide cell</button>
+    </div>
+    <div class="viewnote" id="viewnote">Loading the robot model…</div>
+  </div>
+  <div class="stats">
+    <div class="panel position">
+      <h2>Tool position<span>centimetres from the robot's base, z is height</span></h2>
+      <div class="xyz">
+        <div><span class="axis" id="ax-x">x</span><span class="val mono" id="tool-x">–</span></div>
+        <div><span class="axis" id="ax-y">y</span><span class="val mono" id="tool-y">–</span></div>
+        <div><span class="axis" id="ax-z">z</span><span class="val mono" id="tool-z">–</span></div>
+      </div>
+    </div>
+    <div class="panel joints">
+      <h2>Joints<span>degrees</span></h2>
+      <div class="jointgrid">
+        <svg viewBox="0 0 230 250" role="img" aria-label="Side view of the UR12e arm with the six joints numbered">
         <!-- base plate and column -->
         <rect class="arm" x="30" y="228" width="60" height="10" rx="3"/>
         <rect class="arm" x="45" y="176" width="30" height="54" rx="6"/>
@@ -156,11 +248,11 @@
         <line x1="200" y1="128" x2="200" y2="160" stroke-width="12" stroke-linecap="round" stroke="#a9b6c4"/>
         <rect class="arm" x="190" y="160" width="20" height="14" rx="3"/>
         <!-- rotation axes, dashed -->
-        <ellipse class="axis" cx="60" cy="214" rx="24" ry="7"/>
-        <line class="axis" x1="60" y1="160" x2="60" y2="240"/>
-        <line class="axis" x1="40" y1="178" x2="80" y2="178"/>
-        <line class="axis" x1="182" y1="160" x2="218" y2="160"/>
-        <line class="axis" x1="200" y1="176" x2="200" y2="200"/>
+        <ellipse class="axisline" cx="60" cy="214" rx="24" ry="7"/>
+        <line class="axisline" x1="60" y1="160" x2="60" y2="240"/>
+        <line class="axisline" x1="40" y1="178" x2="80" y2="178"/>
+        <line class="axisline" x1="182" y1="160" x2="218" y2="160"/>
+        <line class="axisline" x1="200" y1="176" x2="200" y2="200"/>
         <!-- joints -->
         <g id="j1"><circle class="joint" cx="60" cy="214" r="11"/><text class="jlabel" x="60" y="218">1</text></g>
         <g id="j2"><circle class="joint" cx="60" cy="178" r="10"/><text class="jlabel" x="60" y="182">2</text></g>
@@ -171,41 +263,43 @@
         <text x="200" y="215" style="font: 11px 'IBM Plex Sans'; fill: #5d6b79; text-anchor: middle">tool</text>
         <text x="60" y="246" style="font: 11px 'IBM Plex Sans'; fill: #5d6b79; text-anchor: middle">base</text>
       </svg>
-      <ol>
-        <li data-joint="1">Base <span>(shoulder pan): turns the whole arm left and right</span></li>
-        <li data-joint="2">Shoulder <span>(shoulder lift): raises and lowers the upper arm</span></li>
-        <li data-joint="3">Elbow<span>: bends the forearm</span></li>
-        <li data-joint="4">Wrist 1<span>: tilts the hand up and down</span></li>
-        <li data-joint="5">Wrist 2<span>: swings the hand sideways</span></li>
-        <li data-joint="6">Wrist 3<span>: spins the tool; "the wrist" on its own means this one</span></li>
-      </ol>
+        <ol id="jointlist"></ol>
+      </div>
     </div>
-    <p style="color: var(--muted); font-size: 13px; margin: 8px 0 2px">Shown bent for clarity. Home is the arm pointing straight up. Positive degrees on joint 1 turn it anticlockwise seen from above.</p>
-    <p>One joint per command, moves are relative to where the arm is now, and the safety layer refuses anything over 30 degrees. Before any motion a card asks you to confirm.</p>
+  </div>
+</section>
+
+<main><div class="column" id="column">
+  <details class="help" id="saved-panel">
+    <summary>Saved moves (<span id="saved-count">0</span>)</summary>
+    <ul id="saved-list"></ul>
+  </details>
+  <details class="help" id="help" open>
+    <summary>What you can say</summary>
+    <ul>
+      <li><span class="cmd">where is the arm right now?</span></li>
+      <li><span class="cmd">move up 5 cm</span></li>
+      <li><span class="cmd">now move it back</span></li>
+      <li><span class="cmd">move to x 10, y -60, z 70</span> (centimetres from the robot's base, z is height)</li>
+      <li><span class="cmd">draw a 5 cm square in the y-z plane</span> (a route of several steps, confirmed once)</li>
+      <li><span class="cmd">draw a spiral flat in the x-y plane starting here, 3 turns, growing to 6 cm across</span> (curves are described by a formula the computer works out)</li>
+      <li><span class="cmd">turn the base 20 degrees</span> (joints: base, shoulder, elbow, wrist 1, wrist 2, wrist 3)</li>
+      <li><span class="cmd">go home</span></li>
+      <li><span class="cmd">stop</span>, or the red <b>Stop robot</b> button at the top, which does not wait for the model. <b>Stop thinking</b> (bottom) gives up on a command the model is still working on.</li>
+    </ul>
+    <p>Moves are straight lines planned by MoveIt. The safety layer refuses steps longer than 20 cm, paths that go more than 30 cm from the start, or turns over 30 degrees, and MoveIt refuses any path that would hit the cell. Before any motion a card shows the plan and asks you to confirm.</p>
   </details>
   <div id="messages"></div>
-  <div id="gate"></div>
-  <div id="thinking" class="thinking" hidden>Thinking…</div>
-</div>
-<aside class="view">
-  <div id="scene"></div>
-  <div class="readout"><table id="readout">
-    <tr><td class="name">1 Base</td><td class="mono">–</td></tr>
-    <tr><td class="name">2 Shoulder</td><td class="mono">–</td></tr>
-    <tr><td class="name">3 Elbow</td><td class="mono">–</td></tr>
-    <tr><td class="name">4 Wrist 1</td><td class="mono">–</td></tr>
-    <tr><td class="name">5 Wrist 2</td><td class="mono">–</td></tr>
-    <tr><td class="name">6 Wrist 3</td><td class="mono">–</td></tr>
-  </table></div>
-  <div class="viewnote" id="viewnote">Loading the robot model…</div>
-</aside>
 </div></main>
+</div>
 
 <footer>
+  <div id="thinking" class="thinking" hidden><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>Thinking <span class="time" id="think-time">0 s</span></div>
+  <div id="gate"></div>
   <form id="form">
     <input id="text" autocomplete="off" placeholder="Tell the arm what to do" autofocus>
     <button id="send" type="submit">Send</button>
-    <button id="stop" type="button">Stop</button>
+    <button id="cancel" type="button" disabled title="Stop the model working on this command">Stop thinking</button>
   </form>
 </footer>
 
@@ -231,69 +325,135 @@ function renderMessage(m) {
   if (m.who === "robot" && m.events) {
     const lines = m.events.map(e => {
       const args = Object.keys(e.args).length ? " " + JSON.stringify(e.args) : "";
-      const t = e.to_motion_s !== undefined ? `, ${e.to_motion_s} s to motion` : "";
+      const after = e.after_s !== undefined ? `, called after ${e.after_s} s` : "";
+      const t = after + (e.to_motion_s !== undefined ? `, ${e.to_motion_s} s to motion` : "");
       const said = e.message ? `<br><span class="mono">${esc(e.message)}</span>` : "";
       return `<span class="${e.outcome}">${e.outcome}</span> <span class="mono">${esc(e.tool + args)}</span>${t}${said}`;
     });
     if (m.total_s) lines.push(`${m.total_s} s in total`);
     if (lines.length) div.innerHTML += `<div class="events">${lines.join("<br>")}</div>`;
+    // Every move that got as far as a plan can be run again, or saved for later.
+    const moves = m.events.filter(e => MOVE_TOOLS.includes(e.tool) && ["done", "cancelled", "stopped", "failed"].includes(e.outcome));
+    if (moves.length) {
+      const row = document.createElement("div"); row.className = "again";
+      for (const e of moves) {
+        const move = {name: m.command || e.tool, tool: e.tool, args: e.args, start_cm: e.start_cm || null};
+        const label = moves.length > 1 ? ` ${e.tool}` : "";
+        const run = document.createElement("button"); run.textContent = "Run again" + label;
+        run.onclick = () => post("/rerun", move).then(refresh);
+        const save = document.createElement("button"); save.textContent = "Save" + label;
+        save.onclick = () => post("/save", move).then(() => { save.textContent = "Saved"; save.disabled = true; refresh(); });
+        row.append(run, save);
+        // Stopped part-way (e.g. a protective stop): after clearing it and pressing Play on the
+        // pendant, go back to where the move began and do the whole thing again.
+        if (["failed", "stopped"].includes(e.outcome) && e.start_cm) {
+          const retry = document.createElement("button"); retry.textContent = "Retry from its start" + label;
+          retry.title = `Clear the stop and press Play on the pendant first. Goes back to ${e.start_cm.join(", ")} cm, then does the whole move.`;
+          retry.onclick = () => post("/rerun", {...move, from_start: true}).then(refresh);
+          row.append(retry);
+        }
+      }
+      div.appendChild(row);
+    }
   }
   return div;
+}
+const MOVE_TOOLS = ["move_by", "move_to", "move_path", "move_formula", "move_joint", "go_home"];
+
+// The saved moves list, kept in a file on the robot computer so it survives restarts.
+let savedShown = "";
+function showSaved(saved) {
+  const key = JSON.stringify(saved);
+  if (key === savedShown) return;
+  savedShown = key;
+  $("saved-count").textContent = saved.length;
+  $("saved-list").innerHTML = saved.length ? "" : '<li><span class="what">Nothing saved yet. Press Save under a move in the chat.</span></li>';
+  saved.forEach((move, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="what">${esc(move.name)} <span class="mono">${esc(move.tool)}</span> <span>${esc(move.model || "")}, ${esc(move.saved || "")}</span></span>`;
+    const here = document.createElement("button"); here.textContent = "Run here";
+    here.title = "Do the same move starting from where the tool is now";
+    here.onclick = () => post("/rerun", move).then(refresh);
+    li.appendChild(here);
+    if (move.start_cm) {
+      const start = document.createElement("button"); start.textContent = "From its start";
+      start.title = `Go back to where it first started (${move.start_cm.join(", ")} cm), then do it`;
+      start.onclick = () => post("/rerun", {...move, from_start: true}).then(refresh);
+      li.appendChild(start);
+    }
+    const del = document.createElement("button"); del.textContent = "Delete";
+    del.onclick = () => post("/unsave", {index: i}).then(refresh);
+    li.appendChild(del);
+    $("saved-list").appendChild(li);
+  });
 }
 
 async function refresh() {
   let s;
   try { s = await (await fetch("/state")).json(); } catch { return; }
-  for (const k of ["ollama", "ursim", "driver", "program"]) $("s-" + k).className = s.status[k] ? "up" : "";
-  $("pendant").href = s.pendant;
-  document.title = `UR12e console, ${s.model}`;
+  for (const k of ["ollama", "moveit", "joint_states"]) $("s-" + k).className = s.status[k] ? "up" : "";
+  document.title = `Robot console, ${s.model}`;
+  $("pendant").hidden = !s.pendant; if (s.pendant) $("pendant").href = s.pendant;
 
-  const box = $("messages");
+  // New messages scroll the chat into view only if you were already at the bottom,
+  // so watching the 3D view is never interrupted.
+  const box = $("messages"), sc = $("scroll");
+  const atBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80;
+  const before = shown;
   for (; shown < s.messages.length; shown++) box.appendChild(renderMessage(s.messages[shown]));
+  if (shown > before && atBottom && before > 0) sc.scrollTop = sc.scrollHeight;
   // Fold the help away once, after the first command. After that it is yours to open and close.
   if (shown > 0 && !helpAutoClosed) { $("help").open = false; helpAutoClosed = true; }
 
   const gate = $("gate");
   if (s.pending && s.pending.id !== pendingId) {
     pendingId = s.pending.id;
-    const canPreview = s.pending.preview && s.status.joints;
+    const p = s.pending.preview;
     gate.innerHTML = `<div class="gate"><div class="title">Confirm this move</div>
       <div class="what mono">${esc(s.pending.text)}</div>
-      <button class="confirm">Confirm and move</button><button class="cancel">Cancel</button>${canPreview ? '<button class="preview">Visualise</button>' : ''}</div>`;
+      <button class="confirm">Confirm and move</button><button class="cancel">Cancel</button>${p ? '<button class="preview">Visualise</button>' : ''}</div>`;
     gate.querySelector(".confirm").onclick = () => post("/confirm", {id: pendingId, ok: true});
     gate.querySelector(".cancel").onclick = () => post("/confirm", {id: pendingId, ok: false});
-    if (canPreview) {
-      const from = s.status.joints.slice(), to = s.pending.preview.target_deg, secs = s.pending.preview.seconds;
-      gate.querySelector(".preview").onclick = () => window.visualise && window.visualise(from, to, secs);
-    }
+    if (p) gate.querySelector(".preview").onclick = () => window.visualise && window.visualise(p.joints, p.path_deg, p.seconds);
+    if (p && window.showRoute) window.showRoute(p.joints, p.path_deg, p.points_cm);
     const m = s.pending.text.match(/joint (\d)/);
-    pendingJoint = m ? m[1] : null;
-    highlightJoint(pendingJoint);
-  } else if (!s.pending) { pendingId = null; gate.innerHTML = ""; if (pendingJoint) { pendingJoint = null; highlightJoint(null); } if (window.hideGhost) window.hideGhost(); }
+    highlightJoint(m ? m[1] : null);
+  } else if (!s.pending && pendingId) { pendingId = null; gate.innerHTML = ""; highlightJoint(null); if (window.hideGhost) window.hideGhost(); }
 
-  if (s.status.joints) {
-    if (window.showLive) window.showLive(s.status.joints);
-    const cells = document.querySelectorAll("#readout td.mono");
-    s.status.joints.forEach((d, i) => { cells[i].textContent = d.toFixed(1) + "°"; });
-  }
+  if (!s.pending && !s.busy && window.clearRoute) window.clearRoute();   // keep the route up while the arm moves
+  if (window.showLive) window.showLive(s.status.joints);
+  const tool = s.status.tool_cm || [null, null, null];
+  ["x", "y", "z"].forEach((a, i) => { $("tool-" + a).textContent = tool[i] === null ? "–" : tool[i].toFixed(1); });
+  showJoints(s.joint_list, s.status.joints);
 
   $("thinking").hidden = !s.busy || !!s.pending;
+  busyFrom = s.busy ? performance.now() - s.busy_for_s * 1000 : null;   // the timer ticks between polls
   $("send").disabled = s.busy;
-  if (s.busy || shown) $("column").lastElementChild.scrollIntoView({block: "end"});
+  $("cancel").disabled = !s.busy;
+  $("think").checked = s.think;
+  $("think").disabled = s.busy || !modelThinks[s.model];
+  showSaved(s.saved || []);
+  lastState = s;
+  showLimits(s);
 }
 
+// The joint list comes from config.py, so it matches whatever robot is connected.
+function showJoints(list, degs) {
+  const ol = $("jointlist");
+  if (!ol.children.length) ol.innerHTML = list.map(([name, word], i) =>
+    `<li data-joint="${i + 1}" data-name="${esc(name)}"><span class="n">${i + 1}</span>${esc(word[0].toUpperCase() + word.slice(1))}<span class="deg mono">–</span></li>`).join("");
+  for (const li of ol.children) {
+    const d = degs[li.dataset.name];
+    li.querySelector(".deg").textContent = d === undefined ? "–" : d.toFixed(1) + "°";
+  }
+}
 
 function highlightJoint(n) {
-  document.querySelectorAll(".joint, .joints li").forEach(el => el.classList.remove("hot"));
+  document.querySelectorAll(".joint.hot, #jointlist li.hot").forEach(el => el.classList.remove("hot"));
   if (!n) return;
-  const j = document.querySelector(`#j${n} .joint`); if (j) j.classList.add("hot");
-  const li = document.querySelector(`.joints li[data-joint="${n}"]`); if (li) li.classList.add("hot");
+  const dot = document.querySelector(`#j${n} .joint`); if (dot) dot.classList.add("hot");
+  const li = document.querySelector(`#jointlist li[data-joint="${n}"]`); if (li) li.classList.add("hot");
 }
-document.querySelectorAll(".joints li").forEach(li => {
-  li.onmouseenter = () => highlightJoint(li.dataset.joint);
-  li.onmouseleave = () => highlightJoint(pendingJoint);
-});
-let pendingJoint = null;
 
 $("form").onsubmit = async e => {
   e.preventDefault();
@@ -302,7 +462,43 @@ $("form").onsubmit = async e => {
   const r = await post("/command", {text});
   if (r.ok) { $("text").value = ""; refresh(); }
 };
-$("stop").onclick = () => post("/stop").then(refresh);
+$("stop-robot").onclick = () => post("/stop").then(refresh);
+
+// The safety limits bar: what the safety layer currently allows, and a form to change it.
+let lastState = null;
+function showLimits(s) {
+  const L = s.limits;
+  $("limits-chips").innerHTML = [
+    `One move <b>≤ ${L.MAX_STEP_CM} cm</b>`, `Path within <b>${L.MAX_PATH_REACH_CM} cm</b> of its start`,
+    `Joint turn <b>≤ ${L.MAX_JOINT_DEG}°</b>`, `Path <b>≤ ${L.MAX_PATH_STEPS}</b> points`, `Speed <b>${Math.round(s.speed * 100)}%</b>`,
+  ].map(t => `<span class="chip">${t}</span>`).join(" ");
+}
+$("limits-edit").onclick = () => {
+  const s = lastState, form = $("limits-form");
+  if (!s) return;
+  form.innerHTML = Object.keys(s.limits).map(name =>
+    `<label>${esc(s.labels[name])} <input type="number" name="${name}" value="${s.limits[name]}" min="1" max="${s.ceilings[name]}" step="any" required></label>`).join("") +
+    '<button type="submit">Save</button><button type="button" id="limits-cancel">Cancel</button>' +
+    '<span class="note">Each has a ceiling set in config.py that cannot be exceeded from here. Speed is fixed. Every change is noted in the chat and the session table.</span>';
+  form.hidden = false;
+  $("limits-cancel").onclick = () => { form.hidden = true; };
+};
+$("limits-form").onsubmit = async e => {
+  e.preventDefault();
+  const changes = {};
+  for (const input of e.target.querySelectorAll("input")) changes[input.name] = Number(input.value);
+  const r = await post("/limits", changes);
+  if (r.ok) { e.target.hidden = true; refresh(); }
+};
+$("cancel").onclick = () => post("/cancel").then(refresh);
+$("reset").onclick = () => post("/reset").then(refresh);
+$("think").onchange = e => post("/think", {on: e.target.checked}).then(refresh);
+
+// The thinking timer, updated five times a second.
+let busyFrom = null;
+setInterval(() => {
+  if (busyFrom !== null) $("think-time").textContent = `${Math.floor((performance.now() - busyFrom) / 1000)} s`;
+}, 200);
 document.querySelectorAll(".cmd").forEach(el => el.onclick = () => { $("text").value = el.textContent; $("text").focus(); });
 
 $("finish").onclick = async () => {
@@ -319,6 +515,22 @@ $("finish").onclick = async () => {
   $("summary").showModal();
 };
 
+// The model menu: every model Ollama has; ones that cannot call tools are shown but disabled.
+const modelThinks = {};
+async function loadModels() {
+  const r = await fetch("/models"), data = await r.json();
+  if (!r.ok) { $("model").innerHTML = `<option>${esc(data.error)}</option>`; return; }
+  data.models.forEach(m => { modelThinks[m.name] = m.thinks; });
+  $("model").innerHTML = data.models.map(m =>
+    `<option value="${esc(m.name)}" ${m.tools ? "" : "disabled"} ${m.name === data.current ? "selected" : ""}>${esc(m.name)}${m.tools ? (m.thinks ? " (can think)" : "") : " (no tool calling)"}</option>`).join("");
+}
+$("model").onchange = async e => {
+  const r = await post("/model", {name: e.target.value});
+  if (!r.ok) loadModels();          // put the menu back if the switch was refused
+  refresh();
+};
+loadModels();
+
 refresh(); setInterval(refresh, 1000);
 </script>
 <script type="importmap">
@@ -331,12 +543,11 @@ refresh(); setInterval(refresh, 1000);
 </script>
 <script type="module">
 // The 3D view: the real robot description, posed from the live joint angles.
-// A translucent orange copy ("ghost") plays a proposed move on request.
+// A translucent orange copy ("ghost") plays MoveIt's planned path on request.
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import URDFLoader from "urdf-loader";
 
-const JOINTS = ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"];
 const el = document.getElementById("scene"), note = document.getElementById("viewnote");
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setPixelRatio(window.devicePixelRatio);
@@ -344,9 +555,18 @@ el.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xffffff);
 const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 20);
-camera.position.set(1.7, 1.3, 1.7);
+// Home view: a sensible default, or the one this browser saved with "Set home".
+const DEFAULT_HOME = {pos: [1.7, 1.3, 1.7], target: [0, 0.55, 0]};
+function savedHome() {
+  try { return JSON.parse(localStorage.getItem("robot-console-home")) || DEFAULT_HOME; } catch { return DEFAULT_HOME; }
+}
+camera.position.fromArray(savedHome().pos);
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.55, 0);
+// Draw only when something changes, so the page leaves the GPU free for the language model.
+let dirty = true;
+controls.addEventListener("change", () => { dirty = true; });
+THREE.DefaultLoadingManager.onProgress = () => { dirty = true; };   // each robot mesh as it arrives
+controls.target.fromArray(savedHome().target);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.2));
 const sun = new THREE.DirectionalLight(0xffffff, 0.9); sun.position.set(2, 3, 1); scene.add(sun);
 scene.add(new THREE.GridHelper(2, 20, 0xcfd6de, 0xe3e8ee));
@@ -371,47 +591,237 @@ function makeLoader(material) {
 function load(loader, onDone) {
   loader.load("/static/robot.urdf", robot => {
     robot.rotation.x = -Math.PI / 2;          // ROS is Z-up, three.js is Y-up
-    scene.add(robot); onDone(robot);
+    scene.add(robot); dirty = true; onDone(robot);
   }, undefined, err => { note.textContent = "Could not load the robot model: " + err; });
 }
-load(makeLoader(null), r => { live = r; note.textContent = ""; if (pendingLive) setPose(live, pendingLive); });
+load(makeLoader(null), r => {
+  live = r; note.textContent = "";
+  live.links.base.add(makeAxes(0.3));      // the frame every x, y, z on this page is measured in
+  loadCell();
+  if (pendingLive) setPose(live, pendingLive);
+});
 load(makeLoader(ghostMaterial), r => { ghost = r; ghost.visible = false; });
 
-function setPose(robot, degs) {
+function setPose(robot, degs) {      // degs is {joint name: degrees}
   if (!robot || !degs) return;
-  JOINTS.forEach((n, i) => robot.setJointValue(n, degs[i] * Math.PI / 180));
+  dirty = true;
+  for (const [name, d] of Object.entries(degs)) if (robot.joints[name]) robot.setJointValue(name, d * Math.PI / 180);
 }
+// Axes in CAD colours (x red, y green, z blue), with letters that always face the camera.
+const AXES = [["x", 0xd03b3b, "#d03b3b"], ["y", 0x2e9d4f, "#2e9d4f"], ["z", 0x2f6fdb, "#2f6fdb"]];
+function letter(text, css) {
+  const c = document.createElement("canvas"); c.width = c.height = 64;
+  const g = c.getContext("2d");
+  g.font = "600 44px IBM Plex Sans, sans-serif"; g.fillStyle = css; g.textAlign = "center"; g.textBaseline = "middle";
+  g.fillText(text, 32, 34);
+  return new THREE.Sprite(new THREE.SpriteMaterial({map: new THREE.CanvasTexture(c), depthTest: false}));
+}
+function makeAxes(length) {
+  const group = new THREE.Group();
+  const directions = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+  AXES.forEach(([name, hex, css], i) => {
+    group.add(new THREE.ArrowHelper(directions[i], new THREE.Vector3(), length, hex, length * 0.2, length * 0.1));
+    const s = letter(name, css);
+    s.position.copy(directions[i]).multiplyScalar(length * 1.3);
+    s.scale.setScalar(length * 0.5);
+    group.add(s);
+  });
+  return group;
+}
+
+// The view cube in the bottom-left corner, like Fusion 360's: it turns with the view, and
+// clicking a face looks at the robot from that side. Faces are named after the robot's base
+// axes, so "+X" looks along x and shows the y-z plane face-on.
+// three.js lays out box faces assuming y is up; the cube is turned a quarter round x below so
+// its "up" is the robot's z. The list is in three.js face order, each with its robot direction.
+const FACES = [["+X", "#d03b3b", [1, 0, 0]], ["−X", "#d03b3b", [-1, 0, 0]], ["TOP", "#2f6fdb", [0, 0, 1]],
+               ["BOTTOM", "#2f6fdb", [0, 0, -1]], ["−Y", "#2e9d4f", [0, -1, 0]], ["+Y", "#2e9d4f", [0, 1, 0]]];
+function faceMaterial(text, css) {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d");
+  g.fillStyle = "#f3f5f8"; g.fillRect(0, 0, 128, 128);
+  g.strokeStyle = "#9aa6b2"; g.lineWidth = 6; g.strokeRect(3, 3, 122, 122);
+  g.font = "700 40px IBM Plex Sans, sans-serif"; g.fillStyle = css; g.textAlign = "center"; g.textBaseline = "middle";
+  if (text === "TOP" || text === "BOTTOM") { g.translate(64, 64); g.rotate(Math.PI); g.translate(-64, -64); }   // read the right way up from the default view
+  g.fillText(text, 64, 66);
+  return new THREE.MeshBasicMaterial({map: new THREE.CanvasTexture(c)});
+}
+const cube = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.8, 1.8), FACES.map(([text, css]) => faceMaterial(text, css)));
+cube.rotation.x = Math.PI / 2;                 // three.js y (label up) becomes the robot's z
+const key = new THREE.Group();
+const keyAxes = makeAxes(2.4);
+keyAxes.position.set(-0.9, -0.9, -0.9);    // along the cube's edges from one corner, as in Fusion
+key.add(cube, keyAxes);
+const keyScene = new THREE.Scene(), keyCamera = new THREE.OrthographicCamera(-2.5, 2.5, 2.5, -2.5, 0.1, 10);
+keyScene.add(key);
+const KEY_PX = 150, baseTurn = new THREE.Quaternion();
+function renderKey() {
+  if (live) { live.links.base.getWorldQuaternion(baseTurn); key.quaternion.copy(baseTurn); }
+  keyCamera.position.copy(camera.position).sub(controls.target).setLength(4);
+  keyCamera.up.copy(camera.up); keyCamera.lookAt(0, 0, 0);
+  renderer.autoClear = false; renderer.clearDepth();
+  renderer.setScissorTest(true); renderer.setScissor(6, 6, KEY_PX, KEY_PX); renderer.setViewport(6, 6, KEY_PX, KEY_PX);
+  renderer.render(keyScene, keyCamera);
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, el.clientWidth, el.clientHeight);
+  renderer.autoClear = true;
+}
+
+// Which cube face (if any) is under the mouse.
+const raycaster = new THREE.Raycaster();
+function faceUnder(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  const x = e.clientX - r.left - 6, y = r.bottom - e.clientY - 6;
+  if (x < 0 || y < 0 || x > KEY_PX || y > KEY_PX) return null;
+  raycaster.setFromCamera(new THREE.Vector2(x / KEY_PX * 2 - 1, y / KEY_PX * 2 - 1), keyCamera);
+  const hit = raycaster.intersectObject(cube)[0];
+  return hit ? FACES[hit.face.materialIndex] : null;
+}
+renderer.domElement.addEventListener("pointermove", e => {
+  const face = faceUnder(e);
+  renderer.domElement.style.cursor = face ? "pointer" : "";
+  renderer.domElement.title = face ? `View from ${face[0]}` : "";
+});
+renderer.domElement.addEventListener("click", e => {
+  const face = faceUnder(e);
+  if (!face) return;
+  const dir = new THREE.Vector3(...face[2]).applyQuaternion(baseTurn);       // base axes to the scene
+  if (Math.abs(dir.y) > 0.99) {                                              // straight down or up: keep a heading
+    const heading = camera.position.clone().sub(controls.target).setY(0).normalize();
+    dir.addScaledVector(heading, 0.002).normalize();
+  }
+  const distance = camera.position.distanceTo(controls.target);
+  flyTo(controls.target.clone().addScaledVector(dir, distance), controls.target.clone());
+});
+
+// Swing the camera round to a new view (instantly if the viewer prefers less motion).
+let fly = null;
+function flyTo(position, target) {
+  const t0 = controls.target.clone(), off0 = camera.position.clone().sub(t0), off1 = position.clone().sub(target);
+  const turn = new THREE.Quaternion().setFromUnitVectors(off0.clone().normalize(), off1.clone().normalize());
+  const T = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 450, start = performance.now();
+  fly = () => {
+    const k = T ? Math.min(1, (performance.now() - start) / T) : 1, e = k * (2 - k);
+    controls.target.lerpVectors(t0, target, e);
+    const dir = off0.clone().normalize().applyQuaternion(new THREE.Quaternion().slerp(turn, e));
+    camera.position.copy(controls.target).addScaledVector(dir, THREE.MathUtils.lerp(off0.length(), off1.length(), e));
+    dirty = true;
+    if (k >= 1) fly = null;
+  };
+}
+
+document.getElementById("view-home").onclick = () => {
+  const home = savedHome();
+  flyTo(new THREE.Vector3().fromArray(home.pos), new THREE.Vector3().fromArray(home.target));
+};
+document.getElementById("view-sethome").onclick = () => {
+  try {
+    localStorage.setItem("robot-console-home", JSON.stringify({pos: camera.position.toArray(), target: controls.target.toArray()}));
+    note.textContent = "This view is now your home view.";
+  } catch {
+    note.textContent = "This browser would not save the home view.";
+  }
+  setTimeout(() => { if (note.textContent.startsWith("This")) note.textContent = ""; }, 3000);
+};
+
 function resize() {
   const w = el.clientWidth, h = el.clientHeight;
-  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); dirty = true;
 }
 new ResizeObserver(resize).observe(el); resize();
 
 window.showLive = degs => { pendingLive = degs; setPose(live, degs); };
-window.visualise = (from, to, seconds) => {
-  if (!ghost) return;
+window.visualise = (names, path, seconds) => {
+  if (!ghost || !path.length) return;
   ghost.visible = true;
   const T = 3000, t0 = performance.now();
-  anim = () => {
+  anim = () => {      // step through MoveIt's planned waypoints, sped up to 3 s
     const k = Math.min(1, (performance.now() - t0) / T);
-    setPose(ghost, from.map((a, i) => a + (to[i] - a) * k));
+    const point = path[Math.round(k * (path.length - 1))];
+    setPose(ghost, Object.fromEntries(names.map((n, i) => [n, point[i]])));
     if (k >= 1) anim = null;
   };
-  note.textContent = `Orange is where the arm would end up. Preview sped up; the real move takes about ${seconds} s.`;
+  note.textContent = `Orange plays the planned path, sped up; the real move takes about ${seconds} s.`;
 };
-window.hideGhost = () => { if (ghost) ghost.visible = false; anim = null; note.textContent = ""; };
+// The planned route, drawn as soon as a confirm card appears. The line is where MoveIt will
+// really take the tool (worked out from the planned joint angles); the dots are the points
+// the model asked for, S being where the tool starts. If the dots are not the shape you
+// asked for, the model got it wrong: cancel.
+const ROUTE = 0x7c3aed;
+let route = null;
+window.showRoute = (names, path, pointsCm) => {
+  window.clearRoute();
+  if (!ghost || !live || !path.length) return;
+  route = new THREE.Group();
+  const line = [];
+  for (const frame of path) {                 // pose the hidden ghost at each step and note where its tool is
+    setPose(ghost, Object.fromEntries(names.map((n, i) => [n, frame[i]])));
+    ghost.updateMatrixWorld(true);
+    line.push(ghost.links.tool0.getWorldPosition(new THREE.Vector3()));
+  }
+  route.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(line),
+                           new THREE.LineBasicMaterial({color: ROUTE, depthTest: false})));
+  live.links.base.updateMatrixWorld(true);
+  (pointsCm || []).forEach((p, i) => {
+    const colour = i ? ROUTE : 0x1b2430;
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.007), new THREE.MeshBasicMaterial({color: colour, depthTest: false}));
+    dot.position.set(p[0] / 100, p[1] / 100, p[2] / 100).applyMatrix4(live.links.base.matrixWorld);   // base frame to the scene
+    const tag = letter(i ? String(i) : "S", i ? "#7c3aed" : "#1b2430");
+    tag.position.copy(dot.position).add(new THREE.Vector3(0, 0.03, 0));
+    tag.scale.setScalar(0.05);
+    route.add(dot, tag);
+  });
+  scene.add(route);
+  note.textContent = pointsCm ? "Purple: the planned route. Dots: the points asked for, S is the start." : "Purple: the planned route of the tool.";
+  dirty = true;
+};
+window.clearRoute = () => {
+  if (!route) return;
+  scene.remove(route); route = null; dirty = true;
+  if (!anim) note.textContent = "";
+};
 
-(function tick() { if (anim) anim(); controls.update(); renderer.render(scene, camera); requestAnimationFrame(tick); })();
-
-// Open the page as /?demo to see the preview ghost without a real pending move.
-if (location.search.includes("demo")) {
-  const demo = setInterval(() => {
-    if (!ghost || !live) return;
-    clearInterval(demo);
-    const from = pendingLive || [0, -90, 0, -90, 0, 0];
-    window.visualise(from, from.map((a, i) => a + [30, 20, -30, 0, 0, 40][i]), 40);
-  }, 500);
+// Where the arm may not go: MoveIt's model of the cell (walls, table, keep-out zones),
+// drawn as see-through red shapes. MoveIt refuses any plan that touches them.
+const cellShapes = [];
+async function loadCell() {
+  let data;
+  try { const r = await fetch("/cell"); if (!r.ok) return; data = await r.json(); } catch { return; }
+  const fill = new THREE.MeshBasicMaterial({color: 0xd03b3b, transparent: true, opacity: 0.1, depthWrite: false});
+  const edge = new THREE.LineBasicMaterial({color: 0xd03b3b, transparent: true, opacity: 0.45});
+  for (const shape of data.shapes) {
+    let geometry;
+    if (shape.kind === "box") geometry = new THREE.BoxGeometry(...shape.size);
+    else if (shape.kind === "sphere") geometry = new THREE.SphereGeometry(shape.size[0], 24, 16);
+    else if (shape.kind === "cylinder") geometry = new THREE.CylinderGeometry(shape.size[1], shape.size[1], shape.size[0], 24).rotateX(Math.PI / 2);  // ROS cylinders stand along z
+    else continue;
+    const solid = new THREE.Mesh(geometry, fill);
+    solid.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), edge));
+    solid.position.fromArray(shape.position);
+    solid.quaternion.fromArray(shape.rotation);
+    solid.name = shape.name;
+    (live.links[shape.frame] || live).add(solid);    // in the frame MoveIt gave it
+    cellShapes.push(solid);
+  }
+  dirty = true;
 }
+document.getElementById("view-cell").onclick = e => {
+  const show = e.target.getAttribute("aria-pressed") !== "true";
+  e.target.setAttribute("aria-pressed", String(show));
+  e.target.textContent = show ? "Hide cell" : "Show cell";
+  cellShapes.forEach(solid => { solid.visible = show; });
+  dirty = true;
+};
+
+window.hideGhost = () => { if (ghost && ghost.visible) { ghost.visible = false; dirty = true; } anim = null; if (!route) note.textContent = ""; };
+
+(function tick() {
+  if (anim) anim();
+  if (fly) fly();
+  controls.update();
+  if (dirty) { renderer.render(scene, camera); renderKey(); dirty = false; }
+  requestAnimationFrame(tick);
+})();
+
 </script>
 </body>
 </html>

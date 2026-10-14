@@ -1,25 +1,29 @@
-# rosa_ws: natural-language control of a UR12e
+# rosa_ws: natural-language control of a robot arm through MoveIt
 
 Jamie Briggs, Strathclyde 4th-year dissertation (project 6074).
 
-Type a plain-English command on the ZenBook and a simulated UR12e moves.
-The language model runs locally on a Mac through Ollama; this code runs on
-the ROS 2 machine.
+Type a plain-English command ("move up 5 cm") and the arm moves. The agent is
+one extra ROS 2 node that plugs into a robot already running **MoveIt**: it
+plans and runs every move through MoveIt's standard interfaces, so it is not
+tied to one robot. The language model runs locally through Ollama.
 
 | File | Purpose |
 |---|---|
-| `config.py` | model name, Ollama address, context size (all overridable by env vars) |
-| `robot_tools.py` | the four actions the model may take, with the first safety checks |
-| `rosa_agent.py` | builds the ROSA agent and runs the text loop |
+| `config.py` | model and Ollama address; the robot as MoveIt knows it (planning group, frames, home pose); safety limits |
+| `robot_tools.py` | the MoveIt adapter: the five tools the model may call, the safety checks, the operator confirm |
+| `rosa_agent.py` | builds the ROSA agent and runs a text loop in the terminal |
+| `web_console.py`, `static/` | the browser console: chat, confirm card with a preview of the plan, 3D view, stop |
 
 ## Run
 
+The robot driver and MoveIt must already be running (simulator or robot).
+
 ```bash
 source /opt/ros/humble/setup.bash
-cd ~/rosa_ws && ./venv/bin/python rosa_agent.py
+cd ~/rosa_ws && ./venv/bin/python web_console.py      # or rosa_agent.py for the terminal
 ```
 
-The UR driver must already be running against URSim or the robot.
+To use another MoveIt robot, edit the MoveIt section of `config.py`.
 
 ## Attribution
 
