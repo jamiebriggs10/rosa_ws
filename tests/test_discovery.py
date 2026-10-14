@@ -33,3 +33,28 @@ def test_moveit_present_needs_both_names():
     assert moveit_present(found)
     without = [i for i in found if i.name != config.CARTESIAN_SERVICE]
     assert not moveit_present(without)
+
+
+def test_scan_lists_action_servers_only(monkeypatch):
+    """Our own node holds action *clients* for MoveIt; they must not make MoveIt look present."""
+    import rclpy.action
+    import discovery
+
+    class FakeNode:
+        def get_name(self):
+            return "rosa_moveit_client"
+        def get_node_names_and_namespaces(self):
+            return [("rosa_moveit_client", "/"), ("move_group", "/")]
+        def get_topic_names_and_types(self):
+            return [("/joint_states", ["sensor_msgs/msg/JointState"])]
+        def get_service_names_and_types(self):
+            return [("/compute_cartesian_path", ["moveit_msgs/srv/GetCartesianPath"])]
+
+    servers = {"move_group": [("/move_action", ["moveit_msgs/action/MoveGroup"])],
+               "rosa_moveit_client": []}
+    monkeypatch.setattr(rclpy.action, "get_action_server_names_and_types_by_node",
+                        lambda node, name, ns: servers[name])
+    found = discovery.scan(FakeNode())
+    assert Interface("/move_action", "action", "moveit_msgs/action/MoveGroup") in found
+    servers["move_group"] = []
+    assert not any(i.kind == "action" for i in discovery.scan(FakeNode()))

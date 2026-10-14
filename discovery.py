@@ -43,10 +43,22 @@ def filter_graph(topics, services, actions, own_names=()):
 
 
 def scan(node):
-    """Read the live graph through our node. Blocks for nothing: the graph is cached locally."""
-    from rclpy.action import get_action_names_and_types
+    """Read the live graph through our node. Blocks for nothing: the graph is cached locally.
+
+    Actions are listed from their *servers* only. The plain action listing would also
+    count our own clients, so MoveIt would look present when only we are running."""
+    from rclpy.action import get_action_server_names_and_types_by_node
+    actions = {}
+    for name, namespace in node.get_node_names_and_namespaces():
+        if name == node.get_name():
+            continue
+        try:
+            for action, types in get_action_server_names_and_types_by_node(node, name, namespace):
+                actions.setdefault(action, types)
+        except Exception:                      # a node that went away between the two calls
+            pass
     return filter_graph(node.get_topic_names_and_types(), node.get_service_names_and_types(),
-                        get_action_names_and_types(node), own_names=(node.get_name(),))
+                        sorted(actions.items()), own_names=(node.get_name(),))
 
 
 def moveit_present(interfaces):
