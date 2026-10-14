@@ -12,6 +12,7 @@ from langchain_ollama import ChatOllama
 from rosa import ROSA, RobotSystemPrompts
 
 import config
+import generic_tools
 import robot_tools
 
 
@@ -46,6 +47,13 @@ def build_agent():
         reasoning=thinking if can_think(config.MODEL) else None,
     )
 
+    # What this particular system offers, read from the ROS graph and the description
+    # file at start. The names here are the only ones the model may use with the generic tools.
+    try:
+        environment = generic_tools.capabilities_text()
+    except Exception as exc:                 # no ROS yet: the model can still call list_capabilities later
+        environment = f"The system's own interfaces could not be listed yet ({exc}). Call list_capabilities."
+
     prompts = RobotSystemPrompts(
         embodiment_and_persona=(
             "You are the control agent for a robot arm. You move its tool in straight lines, "
@@ -71,6 +79,9 @@ def build_agent():
             "tool as your previous move with the OPPOSITE numbers: after move_joint(joint=1, "
             "degrees=10) it is move_joint(joint=1, degrees=-10); after move_by(dx=0, dy=0, dz=5) it "
             "is move_by(dx=0, dy=0, dz=-5). For 'where is the arm', call where_is_the_tool. "
+            "For a request that is not a move (scan, capture, pick a point, read a result, run "
+            "something the system offers), call list_capabilities if you have not seen the list, "
+            "then call_trigger, publish_point or read_topic with the EXACT name from the list. "
             "After the tool returns, reply with what it said, not with what you did. Example: the "
             "tool returns 'Done. The tool is now at x=15.7, y=-63.3, z=82.8 cm.' and you reply "
             "'Done, the tool is now at x 15.7, y -63.3, z 82.8 cm.' Never mention tools or how you "
@@ -89,15 +100,20 @@ def build_agent():
             "(move_formula), turn one "
             "joint (move_joint), go to the home pose "
             "(go_home) and stop (stop). "
+            "For anything that is not a plain move of the arm, this robot system has its own "
+            "services and topics: list_capabilities shows them with their meanings, call_trigger "
+            "runs one of its Trigger services, publish_point sends a point (cm from the base) to "
+            "one of its PointStamped topics, and read_topic reads the latest message on any topic. "
             "You do not need the generic ROS inspection tools for these tasks. Reply in one or two "
             "short sentences."
         ),
+        about_your_environment=environment,
     )
 
     return ROSA(
         ros_version=2,
         llm=llm,
-        tools=robot_tools.ALL_TOOLS,
+        tools=robot_tools.ALL_TOOLS + generic_tools.ALL_TOOLS,
         prompts=prompts,
         verbose=True,            # prints each tool call, useful evidence for the write-up
         streaming=False,
