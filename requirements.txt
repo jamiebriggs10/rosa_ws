@@ -2,3 +2,4 @@ jpl-rosa==1.0.10
 langchain-ollama==0.3.10
 flask==3.1.*
 pyyaml>=6.0
+pytest>=8
