@@ -2,7 +2,6 @@
 # Start the console with ROS and the robot's own workspaces loaded.
 # Used by the installed service, and by hand:  ~/rosa_ws/run.sh
 # The workspaces come from ~/.config/rosa_ws/settings.json ("workspaces": [setup.bash files]).
-set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SETTINGS="${ROSA_SETTINGS:-$HOME/.config/rosa_ws/settings.json}"
 # shellcheck disable=SC1091

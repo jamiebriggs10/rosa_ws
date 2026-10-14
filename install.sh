@@ -54,8 +54,11 @@ else
 fi
 
 say "Python packages (in $DIR/venv, with the system's ROS packages visible)"
+# ROS's setup script reads variables that may be unset, so relax -u while it runs.
+set +u
 # shellcheck disable=SC1090
 source "$ROS"
+set -u
 # shellcheck disable=SC2086
 [ -x "$DIR/venv/bin/python" ] || python3 -m venv --system-site-packages $VENV_OPTS "$DIR/venv"
 "$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check -r "$DIR/requirements.txt"
