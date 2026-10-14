@@ -33,7 +33,12 @@ fail() { printf '\nInstall stopped: %s\n' "$*" >&2; exit 1; }
 say "Checking this computer"
 [ -f "$ROS" ] || fail "ROS 2 Humble was not found at $ROS. Install it first: https://docs.ros.org/en/humble/Installation.html"
 command -v git >/dev/null || fail "git is not installed (sudo apt install git)"
-python3 -c 'import venv, ensurepip' 2>/dev/null || fail "python3-venv is not installed (sudo apt install python3-venv)"
+python3 -c 'import venv' 2>/dev/null || fail "python3's venv module is missing (sudo apt install python3-venv)"
+# Ubuntu ships venv without ensurepip unless python3-venv is installed. Without it we can
+# still make a venv that borrows the system's pip, as long as python3-pip is there.
+if python3 -c 'import ensurepip' 2>/dev/null; then VENV_OPTS=""
+elif python3 -m pip --version >/dev/null 2>&1; then VENV_OPTS="--without-pip"
+else fail "neither python3-venv nor python3-pip is installed (sudo apt install python3-venv)"; fi
 if ! dpkg -s ros-humble-moveit >/dev/null 2>&1; then
   echo "Warning: ros-humble-moveit is not installed. The agent moves the arm through MoveIt, so install it"
   echo "         (sudo apt install ros-humble-moveit) or make sure your robot's workspace provides it."
@@ -51,8 +56,9 @@ fi
 say "Python packages (in $DIR/venv, with the system's ROS packages visible)"
 # shellcheck disable=SC1090
 source "$ROS"
-[ -x "$DIR/venv/bin/python" ] || python3 -m venv --system-site-packages "$DIR/venv"
-"$DIR/venv/bin/pip" install -q --disable-pip-version-check -r "$DIR/requirements.txt"
+# shellcheck disable=SC2086
+[ -x "$DIR/venv/bin/python" ] || python3 -m venv --system-site-packages $VENV_OPTS "$DIR/venv"
+"$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check -r "$DIR/requirements.txt"
 
 say "Settings in $CONF/settings.json"
 mkdir -p "$CONF"
