@@ -40,3 +40,20 @@ def test_anything_but_plain_maths_is_refused(bad):
 def test_x_y_z_mean_the_tools_own_position():
     points = evaluate_formula("[[x + 8*t, y + 3*sin(4*pi*t), z] for i in range(9) for t in [i/8]]")
     assert points[0] == pytest.approx([0, 0, 0]) and points[-1][0] == pytest.approx(8)
+
+
+def test_absolute_coordinates_around_the_tool_are_read_as_absolute(monkeypatch):
+    """A circle written around the tool's position (64.5, -37.4, 103.8) instead of around [0, 0, 0]."""
+    import config
+    from robot_tools import _as_offsets
+    monkeypatch.setattr(config, "MAX_PATH_REACH_CM", 30.0)
+    start = [64.5, -37.4, 103.8]
+    circle = [[64.5 + 5 * math.cos(2 * math.pi * i / 8), -37.4 + 5 * math.sin(2 * math.pi * i / 8), 103.8] for i in range(9)]
+    offsets, note = _as_offsets(circle, start)
+    assert "absolute" in note
+    assert offsets[0] == pytest.approx([5, 0, 0]) and max(math.hypot(*p) for p in offsets) == pytest.approx(5)
+    # genuinely relative points are left alone, with no note
+    assert _as_offsets([[0, 0, 5], [0, 5, 5]], start) == ([[0, 0, 5], [0, 5, 5]], "")
+    # far-away points that are not around the tool stay as they are, so the reach check refuses them
+    far = [[-40, -68, 6], [-58, -68, 6]]
+    assert _as_offsets(far, start) == (far, "")
