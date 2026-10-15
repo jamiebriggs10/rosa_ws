@@ -525,6 +525,23 @@ def evaluate_formula(formula):
         raise ValueError(f"working it out failed ({type(exc).__name__}: {exc}).")
 
 
+ABSOLUTE_SNAP_CM = 10.0   # a path passing this close to the tool, read as absolute coordinates, is taken as absolute
+
+
+def _as_offsets(points, start_cm):
+    """Read the model's points as offsets from the tool, or, when that cannot be right, as absolute
+    coordinates. Models often write a shape around the tool's current position instead of around
+    [0, 0, 0]. Returns (offsets, note); note says when the absolute reading was used."""
+    reach = max(math.hypot(*p) for p in points)
+    if reach <= config.MAX_PATH_REACH_CM:
+        return points, ""
+    absolute = [[p[i] - start_cm[i] for i in range(3)] for p in points]
+    if min(math.hypot(*p) for p in absolute) <= ABSOLUTE_SNAP_CM \
+            and max(math.hypot(*p) for p in absolute) <= config.MAX_PATH_REACH_CM:
+        return absolute, " (the points were read as absolute coordinates, since they lie around where the tool is)"
+    return points, ""
+
+
 def _follow_points(name, args, points):
     """Shared by move_path and move_formula: move through points measured from the start, as one move."""
     # Safety check 1: a sensible route: real, finite numbers and not too many points.
@@ -541,6 +558,10 @@ def _follow_points(name, args, points):
                        "allowed in one path. Nothing was moved.")
 
     # Safety check 2: no point far from the start, and no single leg too long.
+    robot = _get_robot()
+    start = robot.tool_pose()
+    start_cm = _cm(start)
+    offsets, note = _as_offsets(offsets, start_cm)
     reach = max(math.hypot(*point) for point in offsets)
     if reach > config.MAX_PATH_REACH_CM:
         return _record(name, args, "refused",
@@ -556,9 +577,6 @@ def _follow_points(name, args, points):
                        f"{config.MAX_STEP_CM} cm limit for one straight line. Nothing was moved.")
 
     # Safety check 3: MoveIt plans the whole route at once, and every part must hit nothing.
-    robot = _get_robot()
-    start = robot.tool_pose()
-    start_cm = _cm(start)
     points_cm = [[round(s + o, 1) for s, o in zip(start_cm, point)] for point in offsets]
     targets = []
     for p in points_cm:
@@ -575,7 +593,7 @@ def _follow_points(name, args, points):
     # Safety check 4: the operator sees the whole route and confirms it once.
     _current_event["start_cm"] = start_cm
     description = (f"move the tool through {len(offsets)} points, {sum(legs):.1f} cm in total, "
-                   f"from {start_cm} to {points_cm[-1]} cm (about {_seconds(trajectory):.0f} s)")
+                   f"from {start_cm} to {points_cm[-1]} cm (about {_seconds(trajectory):.0f} s){note}")
     print(f"[robot] {description}")
     if not _confirm(description, trajectory, [start_cm] + points_cm):
         return _record(name, args, "cancelled", "Cancelled by the operator. Nothing was moved.")
@@ -585,7 +603,7 @@ def _follow_points(name, args, points):
     if not completed:
         return _record(name, args, "stopped", f"Stopped part-way by the operator. The tool is at {now_cm} cm.")
     return _record(name, args, "done",
-                   f"Done. Went through all {len(offsets)} points; the tool is now at x={now_cm[0]}, y={now_cm[1]}, z={now_cm[2]} cm.")
+                   f"Done. Went through all {len(offsets)} points; the tool is now at x={now_cm[0]}, y={now_cm[1]}, z={now_cm[2]} cm.{note}")
 
 
 @tool
