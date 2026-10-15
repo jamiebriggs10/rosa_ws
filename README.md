@@ -55,6 +55,24 @@ It ends by printing the address to open. Run it again at any time to update.
 
 Without a service: `install.sh --no-service`, then `~/rosa_ws/run.sh` by hand.
 
+## Turning it on after that
+
+```bash
+~/rosa_ws/start.sh
+```
+
+Restarts the console, starts the robot's own software if you have told it how,
+and prints the link. To have it start the robot's software too, put the command
+in `~/.config/rosa_ws/settings.json`:
+
+```json
+"robot_start": "~/lab-driver.sh"
+```
+
+where `lab-driver.sh` is your own few lines: source your workspace, launch your
+driver and MoveIt. It runs in a tmux session called `robot` (`tmux attach -t
+robot` to watch it).
+
 ## First run
 
 1. Start the robot's driver (or its simulator) and its MoveIt launch as you
@@ -138,7 +156,7 @@ added the same way, one tool per type, never per node.
 | `generic_tools.py` | the tools for the system's own services and topics |
 | `rosa_agent.py` | builds the ROSA agent; `python rosa_agent.py` is a terminal version |
 | `web_console.py`, `static/` | the browser console |
-| `install.sh`, `run.sh` | install and start |
+| `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on |
 | `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator |
 
 ## Attribution and citing

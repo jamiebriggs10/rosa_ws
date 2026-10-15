@@ -121,3 +121,4 @@ fi
 
 say "Done. Open http://${IP:-<ip-of-this-computer>}:8000 from the machine that runs Ollama."
 echo "    On that page: Settings, enter the Ollama address, pick a model, and type a command."
+echo "    Next time, to turn everything on:  $DIR/start.sh"
