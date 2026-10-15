@@ -30,7 +30,7 @@ import time
 import urllib.request
 
 from flask import Flask, jsonify, request, send_from_directory
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 
 import config
 import generic_tools
@@ -134,7 +134,11 @@ class Console:
     def _remember_moves(self, events, by_model):
         """Add an exact record of what was done (tools, numbers or formulas, outcomes, positions)
         to the model's memory. Its own reply rarely says this, and without it the model cannot
-        refer back to an earlier move, for example to retrace it."""
+        refer back to an earlier move, for example to retrace it.
+
+        The record goes in as a note from the console, never as part of the model's own
+        words: small models copy whatever they appear to have said before, and were seen
+        writing fake "record" lines claiming moves that never happened."""
         history = getattr(self._agent, "chat_history", None)
         moves = [e for e in events if e["tool"] != "stop"]
         if history is None or not moves:
@@ -145,12 +149,10 @@ class Console:
             if e.get("start_cm"):
                 line += f", starting from {e['start_cm']} cm"
             lines.append(line + f". Result: {e['message']}")
-        record = "[Record of what was done: " + " | ".join(lines) + "]"
-        if by_model and history and isinstance(history[-1], AIMessage):
-            history[-1] = AIMessage(content=f"{history[-1].content}\n{record}")
-        else:                                 # a re-run from the console's buttons, which the model did not make
-            history.extend([HumanMessage(content="(The operator ran a move directly from the console, not through you.)"),
-                             AIMessage(content=record)])
+        who = "you called" if by_model else "the operator ran a move directly from the console, not through you:"
+        history.append(HumanMessage(content=(
+            f"(Console note, not from the operator. For your memory only; never repeat or imitate it. "
+            f"What actually happened, {who} " + " | ".join(lines) + ")")))
 
     def cancel(self):
         """The Stop thinking button: give up on the current command. The model may still be

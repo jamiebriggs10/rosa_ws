@@ -223,15 +223,16 @@ def test_the_model_remembers_exactly_what_was_done(client, monkeypatch):
     client.agent.action = spring
     client.post("/command", json={"text": "make a spring"})
     wait_until(lambda: not web_console.console.busy)
-    memory = client.agent.chat_history[-1].content
-    assert "move_formula" in memory and "[[0, 0, t] for t in [1, 2]]" in memory and "[1, 2, 3]" in memory
+    memory = client.agent.chat_history[-1]
+    assert isinstance(memory, HumanMessage), "the record must not look like the model's own words"
+    assert "move_formula" in memory.content and "[[0, 0, t] for t in [1, 2]]" in memory.content and "[1, 2, 3]" in memory.content
     # a re-run from the buttons is recorded too, as something the operator did
     monkeypatch.setattr(web_console.Console, "_call_tool", lambda self, tool, args: robot_tools.events.append(
         {"tool": tool, "args": args, "outcome": "done", "message": "Done."}) or "ran")
     client.post("/rerun", json={"tool": "move_by", "args": {"dx": 0, "dy": 0, "dz": 2}})
     wait_until(lambda: not web_console.console.busy)
-    assert "operator ran a move directly" in client.agent.chat_history[-2].content
-    assert "move_by" in client.agent.chat_history[-1].content
+    last = client.agent.chat_history[-1].content
+    assert "operator ran a move directly" in last and "move_by" in last
 
 
 def test_limits_change_within_their_ceilings_and_are_announced(client, monkeypatch):
