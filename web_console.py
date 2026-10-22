@@ -27,10 +27,16 @@ One Flask app, one page (static/index.html), and these JSON endpoints:
   POST /robot/mode    {"mode": "sim"|"real"}  which robot the connection panel checks; saved, returns the ladder
   POST /robot/action  {"name": ...}  one step of the connection ladder (bring the profile up, start the
                       driver, power on; 404 unknown, 403 real-robot steps from another computer, 409 failed)
+  POST /voice/on       {"on": true|false}  the voice switch: spoken words become commands (saved, told to the voice app)
+  POST /voice/confirm  {"on": true|false}  let a spoken "yes" / "no" answer the confirm card (saved)
+  POST /voice/url      {"url": ...}  test the voice app's address, save it, reconnect to it
+  GET|POST /voice/<path>  passed on to the voice app (voice.py): options, settings, status, history, presets,
+                       presets/<name>, presets/<name>/load, ptt/down, ptt/up, help; 404 anything else, 502 not answering
 """
 import datetime
 import json
 import pathlib
+import re
 import threading
 import time
 import urllib.request
@@ -436,6 +442,12 @@ def package_file(package, rel):
 
 console = None   # set in main() or by the tests
 
+# The link to the voice app (voice.py). Its callbacks run on the link's own thread and look
+# `console` up when called, because the tests replace it.
+voice_link = voice.VoiceLink(on_final=lambda text: console.heard(text),
+                             on_partial=lambda text: console.heard(text, partial=True),
+                             on_idle=lambda: console.voice_idle())
+
 
 @app.get("/")
 def index():
@@ -451,7 +463,12 @@ def state():
                    limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED,
                    shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
                    frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME}, tools=desktop_tools.rows(),
-                   robot=robot_link.latest, local=_local())
+                   robot=robot_link.latest, local=_local(), voice=voice_state())
+
+
+def voice_state():
+    """What the page shows about voice: the voice app's latest news plus the console's own settings."""
+    return {**voice_link.latest, "on": config.VOICE_ON, "confirm": config.VOICE_CONFIRM, "url": config.VOICE_URL}
 
 
 def _local():
@@ -697,12 +714,67 @@ def finish():
     return jsonify(console.finish())
 
 
+# -- voice: the switch, the address, and a window onto the voice app's own settings ------
+
+@app.post("/voice/on")
+def voice_on():
+    on = bool((request.json or {}).get("on", False))
+    config.save_settings({"voice_on": on})
+    note = voice_link.set_on(on)              # a sentence when the voice app is not answering, else None
+    console.messages.append({"who": "robot", "text": "Voice control is on." if on else "Voice control is off.",
+                             "events": [], "total_s": 0})
+    return jsonify(ok=True, on=on, note=note)
+
+
+@app.post("/voice/confirm")
+def voice_confirm():
+    config.save_settings({"voice_confirm": bool((request.json or {}).get("on", False))})
+    return jsonify(ok=True, confirm=config.VOICE_CONFIRM)
+
+
+@app.post("/voice/url")
+def voice_url():
+    url = (request.json or {}).get("url", "")
+    if not isinstance(url, str) or not url.startswith("http"):
+        return jsonify(error="The address must start with http://, e.g. http://127.0.0.1:8100"), 400
+    url = url.rstrip("/")
+    try:
+        voice_link.request("GET", "/status", base=url)
+    except voice.VoiceUnavailable as exc:
+        return jsonify(error=str(exc)), 502
+    config.save_settings({"voice_url": url})
+    voice_link.reconnect()                    # the listening thread picks the new address up at once
+    return jsonify(ok=True, url=url)
+
+
+# The voice app's pages the pop-up may use. /wake is not among them: the switch is the console's.
+VOICE_PROXIED = re.compile(r"options|settings|status|history|presets|presets/[\w-]+|presets/[\w-]+/load|ptt/(down|up)|help")
+
+
+@app.route("/voice/<path:sub>", methods=["GET", "POST"])
+def voice_proxy(sub):
+    """Pass a request on to the voice app, same method, body and query string, and hand its own
+    answer (status and JSON) straight back, so the page only ever talks to the console."""
+    if not VOICE_PROXIED.fullmatch(sub):
+        return jsonify(error=f"/voice/{sub} is not something the console passes on."), 404
+    path = "/static/help.json" if sub == "help" else "/" + sub
+    if request.query_string:
+        path += "?" + request.query_string.decode()
+    body = request.get_json(silent=True) if request.method == "POST" else None
+    try:
+        status, data = voice_link.request(request.method, path, body)
+    except voice.VoiceUnavailable as exc:
+        return jsonify(error=str(exc)), 502
+    return jsonify(data), status
+
+
 def main():
     global console
     from rosa_agent import abort, build_agent
     console = Console(build_agent, abort)
     print(f"Web console on http://0.0.0.0:8000, model {config.MODEL} at {config.OLLAMA_URL}")
     robot_link.start_background()             # the connection ladder, checked every few seconds
+    voice_link.start_background()             # listens to the voice app, if it is running
     app.run(host="0.0.0.0", port=8000, threaded=True)
 
 

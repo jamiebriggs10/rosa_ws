@@ -456,3 +456,92 @@ def test_session_table_has_a_via_column(client, voice_on):
     text = open(client.post("/finish").get_json()["path"]).read()
     assert "| Via |" in text
     assert "| typed one | typed |" in text and "| spoken one | voice |" in text
+
+
+# -- voice: the routes the pop-up uses -----------------------------------------------
+
+def test_state_carries_voice(client, monkeypatch):
+    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
+    body = client.get("/state").get_json()
+    assert set(body["voice"]) >= {"running", "state", "partial", "final", "on", "confirm", "url"}
+    assert body["voice"]["url"] == "http://127.0.0.1:8100" and body["voice"]["running"] is False
+
+
+def test_voice_on_saves_and_tells_the_app(client, monkeypatch):
+    told = []
+    monkeypatch.setattr(web_console.voice_link, "set_on", lambda on: told.append(on))
+    monkeypatch.setattr(web_console.config, "VOICE_ON", False)
+    r = client.post("/voice/on", json={"on": True})
+    assert r.status_code == 200 and r.get_json()["on"] is True and r.get_json()["note"] is None
+    assert web_console.config.VOICE_ON is True and web_console.config.load_settings()["voice_on"] is True
+    assert told == [True]
+    assert web_console.console.messages[-1]["text"] == "Voice control is on."
+    client.post("/voice/on", json={"on": False})
+    assert web_console.console.messages[-1]["text"] == "Voice control is off." and told == [True, False]
+
+
+def test_voice_on_saves_even_when_the_app_is_unreachable(client, monkeypatch):
+    monkeypatch.setattr(web_console.voice_link, "set_on", lambda on: "The voice app is not answering at http://127.0.0.1:8100.")
+    monkeypatch.setattr(web_console.config, "VOICE_ON", False)
+    r = client.post("/voice/on", json={"on": True})
+    assert r.status_code == 200 and "not answering" in r.get_json()["note"]
+    assert web_console.config.VOICE_ON is True
+
+
+def test_voice_confirm_is_saved(client, monkeypatch):
+    monkeypatch.setattr(web_console.config, "VOICE_CONFIRM", False)
+    assert client.post("/voice/confirm", json={"on": True}).status_code == 200
+    assert web_console.config.VOICE_CONFIRM is True and web_console.config.load_settings()["voice_confirm"] is True
+
+
+def test_bad_voice_url_is_refused(client, monkeypatch):
+    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
+
+    def unreachable(method, path, body=None, timeout_s=3.0, base=None):
+        raise web_console.voice.VoiceUnavailable(f"The voice app is not answering at {base}.")
+    monkeypatch.setattr(web_console.voice_link, "request", unreachable)
+    assert client.post("/voice/url", json={"url": "ten dot two"}).status_code == 400
+    r = client.post("/voice/url", json={"url": "http://10.0.0.2:8100"})
+    assert r.status_code == 502 and "not answering" in r.get_json()["error"]
+    assert web_console.config.VOICE_URL == "http://127.0.0.1:8100"
+
+
+def test_good_voice_url_is_saved_and_reconnects(client, monkeypatch):
+    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
+    asked, reconnected = [], []
+    monkeypatch.setattr(web_console.voice_link, "request",
+                        lambda method, path, body=None, timeout_s=3.0, base=None: asked.append((path, base)) or (200, {"state": "idle"}))
+    monkeypatch.setattr(web_console.voice_link, "reconnect", lambda: reconnected.append(1))
+    r = client.post("/voice/url", json={"url": "http://10.0.0.2:8100/"})
+    assert r.status_code == 200 and r.get_json()["url"] == "http://10.0.0.2:8100"
+    assert asked == [("/status", "http://10.0.0.2:8100")] and reconnected == [1]
+    assert web_console.config.VOICE_URL == "http://10.0.0.2:8100"
+    assert web_console.config.load_settings()["voice_url"] == "http://10.0.0.2:8100"
+
+
+def test_voice_proxy_forwards_allowed_paths_only(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(web_console.voice_link, "request",
+                        lambda method, path, body=None, timeout_s=3.0, base=None: seen.append((method, path, body)) or (200, {"ok": True}))
+    assert client.get("/voice/options").get_json() == {"ok": True}
+    assert client.post("/voice/presets/mine?overwrite=1").status_code == 200
+    assert client.post("/voice/settings", json={"vad": {"use": "webrtc"}}).status_code == 200
+    assert client.get("/voice/help").status_code == 200
+    assert seen == [("GET", "/options", None), ("POST", "/presets/mine?overwrite=1", None),
+                    ("POST", "/settings", {"vad": {"use": "webrtc"}}), ("GET", "/static/help.json", None)]
+    assert client.post("/voice/wake", json={"on": True}).status_code == 404     # the switch is the console's
+    assert client.get("/voice/../etc/passwd").status_code == 404
+    assert client.get("/voice/presets/mine/delete").status_code == 404
+
+
+def test_voice_proxy_passes_status_and_body_through(client, monkeypatch):
+    monkeypatch.setattr(web_console.voice_link, "request",
+                        lambda method, path, body=None, timeout_s=3.0, base=None: (409, {"error": "preset mine exists"}))
+    r = client.post("/voice/presets/mine")
+    assert r.status_code == 409 and r.get_json() == {"error": "preset mine exists"}
+
+    def unreachable(method, path, body=None, timeout_s=3.0, base=None):
+        raise web_console.voice.VoiceUnavailable("The voice app is not answering at http://127.0.0.1:8100.")
+    monkeypatch.setattr(web_console.voice_link, "request", unreachable)
+    r = client.get("/voice/status")
+    assert r.status_code == 502 and "not answering" in r.get_json()["error"]
