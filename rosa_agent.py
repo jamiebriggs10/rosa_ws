@@ -13,6 +13,7 @@ from rosa import ROSA, RobotSystemPrompts
 
 import config
 import generic_tools
+import robot_link
 import robot_tools
 
 
@@ -113,7 +114,7 @@ def build_agent():
     return ROSA(
         ros_version=2,
         llm=llm,
-        tools=robot_tools.ALL_TOOLS + generic_tools.ALL_TOOLS,
+        tools=robot_tools.ALL_TOOLS + generic_tools.ALL_TOOLS + robot_link.ALL_TOOLS,
         prompts=prompts,
         verbose=True,            # prints each tool call, useful evidence for the write-up
         streaming=False,

@@ -24,6 +24,9 @@ One Flask app, one page (static/index.html), and these JSON endpoints:
   GET  /tools              the tool buttons (RViz, rqt, a terminal, a bag recorder) and their state
   POST /tools/<name>       open that tool on the console's own computer (404 unknown, 409 cannot run here)
   POST /tools/<name>/stop  close it (SIGINT first, so a recording's bag file is closed properly)
+  POST /robot/mode    {"mode": "sim"|"real"}  which robot the connection panel checks; saved, returns the ladder
+  POST /robot/action  {"name": ...}  one step of the connection ladder (bring the profile up, start the
+                      driver, power on; 404 unknown, 403 real-robot steps from another computer, 409 failed)
 """
 import datetime
 import json
@@ -38,6 +41,7 @@ from langchain_core.messages import HumanMessage
 import config
 import desktop_tools
 import generic_tools
+import robot_link
 import robot_tools
 
 CONFIRM_TIMEOUT_S = 60
@@ -394,7 +398,13 @@ def state():
                    pendant=config.PENDANT_URL, joint_list=config.JOINTS, saved=console.saved,
                    limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED,
                    shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
-                   frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME}, tools=desktop_tools.rows())
+                   frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME}, tools=desktop_tools.rows(),
+                   robot=robot_link.latest, local=_local())
+
+
+def _local():
+    """Is this request from the robot's own computer (the browser on its screen)?"""
+    return request.remote_addr in ("127.0.0.1", "::1")
 
 
 @app.get("/pkg/<package>/<path:rel>")
@@ -604,6 +614,32 @@ def stop_tool(name):
     return jsonify(ok=True, stopped=stopped)
 
 
+# -- the robot connection panel: the ladder lives in robot_link, only names come from the page --
+
+@app.post("/robot/mode")
+def robot_mode():
+    mode = (request.json or {}).get("mode")
+    if mode not in ("sim", "real"):
+        return jsonify(error="The mode is sim or real."), 400
+    config.save_settings({"robot_mode": mode})
+    robot_link.refresh()
+    return jsonify(robot_link.latest)
+
+
+@app.post("/robot/action")
+def robot_action():
+    name = (request.json or {}).get("name", "")
+    if name not in robot_link.ACTIONS:
+        return jsonify(error=f"There is no action called {name}."), 404
+    if robot_link.needs_local(name, config.ROBOT_MODE) and not _local():
+        return jsonify(error="The real robot is only started from the robot's computer's own screen."), 403
+    try:
+        message = robot_link.run_action(name, config.ROBOT_MODE)
+    except RuntimeError as exc:
+        return jsonify(error=str(exc)), 409
+    return jsonify(ok=True, message=message, robot=robot_link.latest)
+
+
 @app.post("/finish")
 def finish():
     return jsonify(console.finish())
@@ -614,6 +650,7 @@ def main():
     from rosa_agent import abort, build_agent
     console = Console(build_agent, abort)
     print(f"Web console on http://0.0.0.0:8000, model {config.MODEL} at {config.OLLAMA_URL}")
+    robot_link.start_background()             # the connection ladder, checked every few seconds
     app.run(host="0.0.0.0", port=8000, threaded=True)
 
 

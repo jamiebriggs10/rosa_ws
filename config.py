@@ -109,6 +109,22 @@ LIMIT_CEILINGS = {"MAX_STEP_CM": 50.0, "MAX_PATH_REACH_CM": 80.0, "MAX_JOINT_DEG
 # (tunnelled to the Mac by scripts/sim-up). Empty hides the link.
 PENDANT_URL = os.environ.get("PENDANT_URL", "http://localhost:6080/vnc.html")
 
+# --- The robot connection panel ----------------------------------------------------
+# Which ladder of checks the console shows and which start.sh mode its Start button uses:
+# "sim" (the simulator) or "real" (the arm on the cable). Switched on the page.
+ROBOT_MODE = "sim"
+# The real robot's control box and this computer's address on the cable to it, e.g.
+# 172.31.1.69 and 172.31.1.137 in the Strathclyde cell. Empty until set in settings.
+ROBOT_IP = ""
+COMPUTER_IP = ""
+# The wired port the robot cable goes into (e.g. enp130s0f0). Empty: the console picks a
+# wired port that has a cable in it and does not carry this computer's internet route.
+ROBOT_PORT = ""
+# The NetworkManager connection that gives that port its address; "nmcli con up <name>".
+NETWORK_PROFILE = "robot"
+# Where URSim answers when the simulator is used.
+URSIM_IP = "192.168.56.101"
+
 # An RViz settings file (.rviz) for the console's RViz button, so it opens showing the
 # robot and the cell. Empty opens RViz with its defaults. Set as "rviz_config" in settings.
 RVIZ_CONFIG = ""
@@ -140,6 +156,7 @@ def apply_settings(settings):
     """Copy valid values from a settings dict onto this module. Bad values are ignored,
     so a damaged file can never stop the console from starting."""
     global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES, RVIZ_CONFIG
+    global ROBOT_MODE, ROBOT_IP, COMPUTER_IP, ROBOT_PORT, NETWORK_PROFILE, URSIM_IP
     url = settings.get("ollama_url")
     if isinstance(url, str) and url.startswith("http"):
         OLLAMA_URL = url.rstrip("/")
@@ -155,6 +172,12 @@ def apply_settings(settings):
         WORKSPACES = [w for w in settings["workspaces"] if isinstance(w, str)]
     if isinstance(settings.get("rviz_config"), str):
         RVIZ_CONFIG = settings["rviz_config"]
+    if settings.get("robot_mode") in ("sim", "real"):
+        ROBOT_MODE = settings["robot_mode"]
+    for key, name in (("robot_ip", "ROBOT_IP"), ("computer_ip", "COMPUTER_IP"), ("robot_port", "ROBOT_PORT"),
+                      ("network_profile", "NETWORK_PROFILE"), ("ursim_ip", "URSIM_IP")):
+        if isinstance(settings.get(key), str):
+            globals()[name] = settings[key].strip()
     for name, value in (settings.get("limits") or {}).items():
         if name in LIMIT_CEILINGS and isinstance(value, (int, float)) and not isinstance(value, bool) \
                 and 0 < value <= LIMIT_CEILINGS[name]:

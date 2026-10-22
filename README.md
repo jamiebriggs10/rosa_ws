@@ -147,6 +147,34 @@ If the robot is not a UR12e, first edit the MoveIt section of
 `~/rosa_ws/config.py`: the planning group, the base and tool frame names, and
 the home pose, as its MoveIt config defines them.
 
+## The robot-connection widget
+
+The button next to the three lights says in a few words whether the robot can
+be driven ("Real robot: not plugged in", "Simulator: ready"). Click it for the
+full picture: a ladder of checks, run every few seconds on the robot's
+computer, that stops at the first problem and says whose job it is.
+
+| Real robot | Simulator |
+|---|---|
+| 1. a cable on the robot port | 1. URSim answering |
+| 2. this computer's address on it (button: use the saved network profile) | 2. power, brakes, safety, program (buttons: power on, release brakes) |
+| 3. the control box answering (ping, dashboard, primary, RTDE ports) | 3. the driver (button: start, stop) |
+| 4. power, brakes, safety, loaded program, Local or Remote (buttons as the robot allows) | 4. the driver's program running |
+| 5. the driver (button: start, stop) | 5. the speed slider |
+| 6. Play on the pendant, and the joint controller active | |
+| 7. the speed slider, with a warning above 20 % | |
+
+The addresses come from `settings.json`: `robot_mode` (`sim` or `real`,
+switched in the dialog), `robot_ip`, `computer_ip`, `robot_port` (empty: picked
+automatically), `network_profile`, `ursim_ip`. The example settings carry the
+Strathclyde cell's values.
+
+In real mode the buttons work only when the page is opened on the robot's
+computer's own screen, the same rule as `start.sh real`. Nothing on this panel
+moves the arm; Play, the speed slider, protective stops and the e-stop stay on
+the pendant on purpose. The model has a read-only `robot_status` tool with the
+same ladder, so "is the robot ready?" gets a true answer.
+
 ## The tool buttons
 
 When the page is opened on the robot's computer itself, a row of buttons
@@ -238,6 +266,7 @@ added the same way, one tool per type, never per node.
 | `setup-machine.sh` | the once-only sudo steps for a fresh Ubuntu 22.04 computer |
 | `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on (`sim`, `real`, `stop`) |
 | `desktop_tools.py` | the tool buttons: the fixed list of programs the console may open |
+| `robot_link.py` | the robot-connection ladder: the checks, the actions, the `robot_status` tool |
 | `examples/` | the description file and the start scripts for the Strathclyde UR12e cell |
 | `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator |
 

@@ -298,3 +298,47 @@ def test_state_carries_tools_and_routes_refuse_unknown(client, monkeypatch):
     assert r.status_code == 409 and r.get_json()["error"]
     assert client.post("/tools/nope/stop").status_code == 404
     assert client.post("/tools/rviz/stop").get_json() == {"ok": True, "stopped": False}   # it was never running
+
+
+# -- the robot connection panel -------------------------------------------------
+
+def test_state_carries_the_robot_ladder(client, monkeypatch):
+    ladder = {"mode": "sim", "overall": {"lamp": "wait", "text": "Not checked yet"}, "alert": {}, "rungs": []}
+    monkeypatch.setattr(web_console.robot_link, "latest", ladder)
+    body = client.get("/state").get_json()
+    assert body["robot"] == ladder and body["local"] is True            # the test client is 127.0.0.1
+    body = client.get("/state", environ_base={"REMOTE_ADDR": "10.0.0.5"}).get_json()
+    assert body["local"] is False
+
+
+def test_robot_actions_are_refused_remotely_in_real_mode(client, monkeypatch):
+    ran = []
+    monkeypatch.setattr(web_console.robot_link, "run_action", lambda name, mode: ran.append((name, mode)) or "Driver starting.")
+    monkeypatch.setattr(web_console.config, "ROBOT_MODE", "real")
+    r = client.post("/robot/action", json={"name": "driver_start"}, environ_base={"REMOTE_ADDR": "10.0.0.5"})
+    assert r.status_code == 403 and ran == []
+    assert r.get_json()["error"] == "The real robot is only started from the robot's computer's own screen."
+    r = client.post("/robot/action", json={"name": "driver_start"}, environ_base={"REMOTE_ADDR": "127.0.0.1"})
+    assert r.status_code == 200 and ran == [("driver_start", "real")]
+    assert r.get_json()["ok"] is True and r.get_json()["message"] == "Driver starting." and "robot" in r.get_json()
+    monkeypatch.setattr(web_console.config, "ROBOT_MODE", "sim")        # the simulator may be started from anywhere
+    r = client.post("/robot/action", json={"name": "driver_start"}, environ_base={"REMOTE_ADDR": "10.0.0.5"})
+    assert r.status_code == 200 and ran[-1] == ("driver_start", "sim")
+    assert client.post("/robot/action", json={"name": "reboot"}).status_code == 404
+    def failing(name, mode):
+        raise RuntimeError("URSim is not running")
+    monkeypatch.setattr(web_console.robot_link, "run_action", failing)
+    r = client.post("/robot/action", json={"name": "power_on"})
+    assert r.status_code == 409 and "URSim" in r.get_json()["error"]
+
+
+def test_robot_mode_is_saved(client, monkeypatch):
+    monkeypatch.setattr(web_console.config, "ROBOT_MODE", "sim")
+    refreshed = []
+    monkeypatch.setattr(web_console.robot_link, "refresh", lambda: refreshed.append(1))
+    monkeypatch.setattr(web_console.robot_link, "latest", {"mode": "real", "rungs": []})
+    r = client.post("/robot/mode", json={"mode": "real"})
+    assert r.status_code == 200 and r.get_json()["mode"] == "real" and refreshed == [1]
+    assert web_console.config.ROBOT_MODE == "real"
+    assert web_console.config.load_settings()["robot_mode"] == "real"
+    assert client.post("/robot/mode", json={"mode": "moon"}).status_code == 400

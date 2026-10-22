@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Turn everything on, once installed:   ~/rosa_ws/start.sh [sim|real|stop]
+# Turn everything on, once installed:   ~/rosa_ws/start.sh [sim|real|stop] [--no-console]
 #
 #   sim     start the simulator and the robot software against it, then the console
 #   real    start the robot software against the real robot, then the console
@@ -19,6 +19,7 @@ set -euo pipefail
 SETTINGS="${ROSA_SETTINGS:-$HOME/.config/rosa_ws/settings.json}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-}"
+CONSOLE=1; [ "${2:-}" = "--no-console" ] && CONSOLE=0   # the console itself calls this: do not restart it
 
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 
@@ -111,11 +112,13 @@ case "$MODE" in
     fail "Usage: $0 [sim|real|stop]   (try --help)" ;;
 esac
 
-import_display
-if systemctl --user restart rosa-console 2>/dev/null; then
-  echo "Console: restarted (service rosa-console)."
-else
-  echo "Console: no service installed; run $HERE/install.sh first, or start it with $HERE/run.sh"
+if [ "$CONSOLE" = 1 ]; then
+  import_display
+  if systemctl --user restart rosa-console 2>/dev/null; then
+    echo "Console: restarted (service rosa-console)."
+  else
+    echo "Console: no service installed; run $HERE/install.sh first, or start it with $HERE/run.sh"
+  fi
 fi
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"

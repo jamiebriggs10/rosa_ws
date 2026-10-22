@@ -149,6 +149,39 @@
   .events { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 13px; color: var(--muted); }
   .events .done { color: var(--ok); } .events .refused, .events .cancelled, .events .stopped, .events .no_motion, .events .failed { color: var(--bad); }
 
+  /* The robot-connection widget in the header, and the dialog it opens */
+  .robot-widget { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 13px; padding: 4px 10px;
+    border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink); cursor: pointer; }
+  .robot-widget:hover { border-color: var(--muted); }
+  .lamp { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #9aa5b1; flex: none; }
+  .lamp.ok { background: var(--ok); } .lamp.bad { background: var(--bad); } .lamp.gate { background: var(--gate); }
+  #robot-dialog { max-width: 760px; }
+  #robot-dialog .head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+  #robot-dialog .head h2 { font-size: 17px; margin: 0 auto 0 0; }
+  #robot-dialog .mode { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  #robot-dialog .mode button { border: none; border-radius: 0; padding: 4px 10px; font-size: 13px; color: var(--muted); }
+  #robot-dialog .mode button.sel { background: var(--action); color: #fff; }
+  #robot-dialog .pill { font-size: 12px; border-radius: 999px; padding: 2px 9px; white-space: nowrap; font-weight: 500; background: #eef1f4; color: var(--muted); }
+  #robot-dialog .pill.ok { background: #def3e6; color: var(--ok); } #robot-dialog .pill.bad { background: #fbe4e2; color: var(--bad); }
+  #robot-dialog .pill.gate { background: var(--gate-bg); color: var(--gate); }
+  #robot-dialog .alert { padding: 8px 12px; border-radius: 6px; font-size: 14px; border: 1px solid var(--line); margin: 6px 0 10px; }
+  #robot-dialog .alert.ok { background: #def3e6; border-color: var(--ok); color: var(--ok); }
+  #robot-dialog .alert.bad { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
+  #robot-dialog .alert.gate { background: var(--gate-bg); border-color: var(--gate); color: var(--gate); }
+  #robot-dialog ol { list-style: none; margin: 0; padding: 0; }
+  #robot-dialog .step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+  #robot-dialog .step:last-child { border-bottom: none; }
+  #robot-dialog .step .lamp { margin-top: 7px; }
+  #robot-dialog .step .t { font-weight: 500; }
+  #robot-dialog .step .d { color: var(--muted); font-size: 13px; white-space: pre-line; }
+  #robot-dialog .step .act { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  #robot-dialog .step .act button { font-size: 13px; padding: 4px 11px; }
+  #robot-dialog .step .act button.primary { border-color: var(--action); color: var(--action); }
+  #robot-dialog .step .act button:disabled { opacity: .45; cursor: default; }
+  #robot-dialog .step .you { font-size: 12px; color: var(--gate); font-weight: 500; white-space: nowrap; }
+  #robot-dialog .foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  #robot-dialog .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+
   .gate {
     align-self: stretch; background: var(--gate-bg); border: 2px solid var(--gate); border-radius: 10px; padding: 14px 16px;
   }
@@ -213,6 +246,7 @@
     <span id="s-ollama">Model</span>
     <span id="s-moveit">MoveIt</span>
     <span id="s-joint_states">Joint states</span>
+    <button class="robot-widget" id="robot-widget" type="button" title="How the robot is connected, and what to do next"><span class="lamp" id="robot-lamp"></span><span id="robot-text">Robot: checking…</span></button>
     <span class="hint" id="hint" hidden></span>
   </div>
   <button id="reset" type="button" title="Make the model forget this conversation, e.g. after it gets confused">New conversation</button>
@@ -347,6 +381,24 @@
 </footer>
 
 <dialog id="summary"></dialog>
+<!-- The robot-connection panel: a ladder of checks for the simulator or the real robot, redrawn from /state. -->
+<dialog id="robot-dialog">
+  <div class="head">
+    <h2>Robot connection</h2>
+    <div class="mode" role="group" aria-label="Which robot">
+      <button type="button" id="robot-mode-sim" data-mode="sim">Simulator</button>
+      <button type="button" id="robot-mode-real" data-mode="real">Real robot</button>
+    </div>
+    <span class="pill" id="robot-overall">…</span>
+  </div>
+  <div class="alert" id="robot-alert"></div>
+  <ol id="robot-ladder"></ol>
+  <p class="note" id="robot-note"></p>
+  <div class="foot">
+    <button type="button" id="robot-recheck">Check again</button>
+    <button type="button" onclick="this.closest('dialog').close()">Close</button>
+  </div>
+</dialog>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -487,6 +539,7 @@ async function refresh() {
   $("think").disabled = s.busy || !modelThinks[s.model];
   showSaved(s.saved || []);
   showTools(s.tools || [], !!s.pendant);
+  if (s.robot) showRobot(s.robot, !!s.local);
   lastState = s;
   showLimits(s);
 }
@@ -494,6 +547,70 @@ async function refresh() {
 // The tool buttons, one per tool that can run on the console's computer. They are rebuilt
 // only when the list changes, so a poll never redraws a button someone is about to click.
 // Only Record toggles ("Stop recording"); the others simply reopen if closed.
+// The robot-connection widget and its dialog. The ladder comes from /state.robot (computed on the
+// server every few seconds); the dialog is redrawn only when it changes, so a poll never pulls a
+// button out from under a click. Actions post a name; the server decides what it may run.
+let robotKey = null, robotMode = "sim", robotLocal = false, robotArmed = null, robotMessage = "";
+const MODE_NAMES = {sim: "Simulator", real: "Real robot"};
+function showRobot(r, local) {
+  robotMode = r.mode || robotMode; robotLocal = local;
+  $("robot-lamp").className = "lamp " + (r.overall ? r.overall.lamp : "");
+  $("robot-text").textContent = `${MODE_NAMES[robotMode] || "Robot"}: ${r.overall ? r.overall.text : "…"}`;
+  const key = JSON.stringify([r, local, robotArmed, robotMessage]);
+  if (key === robotKey) return;
+  robotKey = key;
+  for (const m of ["sim", "real"]) $("robot-mode-" + m).className = m === robotMode ? "sel" : "";
+  const overall = $("robot-overall"); overall.className = "pill " + (r.overall ? r.overall.lamp : ""); overall.textContent = r.overall ? r.overall.text : "…";
+  const alert = $("robot-alert");
+  if (robotMessage) { alert.className = "alert bad"; alert.textContent = robotMessage; }
+  else { alert.className = "alert " + (r.alert ? r.alert.lamp : ""); alert.textContent = r.alert ? r.alert.text : ""; }
+  const ol = $("robot-ladder"); ol.innerHTML = "";
+  (r.rungs || []).forEach((rung, i) => {
+    const li = document.createElement("li"); li.className = "step";
+    const act = document.createElement("div"); act.className = "act";
+    if (rung.action) {
+      const b = document.createElement("button"); b.type = "button";
+      const needsLocal = robotMode === "real" && !local;
+      const armed = robotArmed === rung.action.name;
+      b.textContent = armed ? "Press again to confirm" : rung.action.label;
+      if (rung.action.name === "driver_start") b.classList.add("primary");
+      if (needsLocal) { b.disabled = true; b.title = "Only from the robot's computer's own screen"; }
+      b.onclick = () => robotAction(rung.action.name);
+      act.appendChild(b);
+    }
+    if (rung.yours) { const y = document.createElement("span"); y.className = "you"; y.textContent = "you do this"; act.appendChild(y); }
+    const text = document.createElement("div");
+    text.innerHTML = `<div class="t"></div><div class="d"></div>`;
+    text.firstChild.textContent = `${i + 1}. ${rung.title}`; text.lastChild.textContent = rung.detail || "";
+    const lamp = document.createElement("span"); lamp.className = "lamp " + rung.lamp;
+    li.append(lamp, text, act); ol.appendChild(li);
+  });
+  $("robot-note").textContent = robotMode === "real"
+    ? "Nothing here moves the arm. Starting the driver, powering on and releasing the brakes only work from this computer's own screen; Play and the speed slider stay on the pendant."
+    : "The simulator's checks. Switch to Real robot when the cable is in.";
+}
+async function robotAction(name) {
+  // Powering on or releasing the brakes of the real arm takes two presses.
+  if (robotMode === "real" && (name === "power_on" || name === "brake_release") && robotArmed !== name) {
+    robotArmed = name; robotKey = null; refresh(); return;
+  }
+  robotArmed = null; robotMessage = "";
+  let r;
+  try { r = await fetch("/robot/action", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name})}); } catch { return; }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) robotMessage = data.error || "Something went wrong";
+  robotKey = null; refresh();
+}
+async function robotSetMode(mode) {
+  robotArmed = null; robotMessage = "";
+  await fetch("/robot/mode", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode})}).catch(() => {});
+  robotKey = null; refresh();
+}
+$("robot-widget").onclick = () => { robotMessage = ""; $("robot-dialog").showModal(); };
+$("robot-mode-sim").onclick = () => robotSetMode("sim");
+$("robot-mode-real").onclick = () => robotSetMode("real");
+$("robot-recheck").onclick = () => robotSetMode(robotMode);
+
 let toolsKey = null, toolHint = "", toolHintUntil = 0;
 function showTools(tools, pendant) {
   const usable = tools.filter(t => t.available);
