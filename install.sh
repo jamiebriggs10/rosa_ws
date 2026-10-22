@@ -120,7 +120,7 @@ Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
 Environment=ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
-Environment=ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY:-0}
+Environment=ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY:-1}
 
 [Install]
 WantedBy=default.target
