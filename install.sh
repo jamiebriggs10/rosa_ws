@@ -117,6 +117,7 @@ After=network.target
 [Service]
 ExecStart=$DIR/run.sh
 Restart=on-failure
+TimeoutStopSec=10
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
 Environment=ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}

@@ -33,9 +33,21 @@ def good(monkeypatch):
     monkeypatch.setattr(robot_link, "driver_status", lambda: {"joint_states": True, "moveit": True})
     monkeypatch.setattr(robot_link, "program_running", lambda: True)
     monkeypatch.setattr(robot_link, "controller_active", lambda name: True)
-    monkeypatch.setattr(robot_link, "speed_scaling", lambda: 0.1)
+    monkeypatch.setattr(robot_link, "speed_scaling", lambda: 10.0)     # percent, as the UR driver publishes it
     monkeypatch.setattr(robot_link, "run_command", lambda argv: "")
+    monkeypatch.setattr(robot_link, "profile_exists", lambda name: True)
     return answers
+
+
+def test_a_missing_network_profile_gets_the_one_time_command(good, monkeypatch):
+    monkeypatch.setattr(robot_link, "addresses", lambda port: [])
+    monkeypatch.setattr(robot_link, "profile_exists", lambda name: False)
+    rung = robot_link.ladder("real")["rungs"][1]
+    assert rung["lamp"] == "bad" and rung["action"] is None and rung["yours"] is True
+    assert "nmcli con add" in rung["detail"] and "172.31.1.137/24" in rung["detail"]
+    monkeypatch.setattr(robot_link, "profile_exists", lambda name: True)
+    rung = robot_link.ladder("real")["rungs"][1]
+    assert rung["action"]["name"] == "profile"
 
 
 def lamps(ladder):
@@ -92,7 +104,7 @@ def test_play_and_speed_are_the_operators(good, monkeypatch):
     rung = robot_link.ladder("real")["rungs"][5]
     assert rung["lamp"] == "gate" and rung["yours"] is True and "Press Play" in rung["detail"]
     monkeypatch.setattr(robot_link, "program_running", lambda: True)
-    monkeypatch.setattr(robot_link, "speed_scaling", lambda: 0.45)
+    monkeypatch.setattr(robot_link, "speed_scaling", lambda: 45.0)
     rung = robot_link.ladder("real")["rungs"][6]
     assert rung["lamp"] == "gate" and "45 %" in rung["detail"] and "10 to 20 %" in rung["detail"]
 

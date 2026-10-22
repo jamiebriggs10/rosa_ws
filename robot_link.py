@@ -139,6 +139,11 @@ def parse_reply(reply):
     return reply.split(":", 1)[1].strip() if ":" in reply else reply.split()[0]
 
 
+def profile_exists(name):
+    """Does NetworkManager know a connection of that name? (nmcli -t prints one name per line.)"""
+    return name in run_command(["nmcli", "-t", "-f", "NAME", "con", "show"]).splitlines()
+
+
 def tmux_session(name):
     """Does a tmux session of that name exist? (start.sh keeps the driver in one.)"""
     return subprocess.run(["tmux", "has-session", "-t", name], capture_output=True).returncode == 0
@@ -173,20 +178,22 @@ def _watch(topic, msg_type):
     _subscribed.add(topic)
 
 
-def _fresh(topic):
+def _fresh(topic, max_age_s=FRESH_S):
+    """The last value on a topic, or None when it is older than max_age_s (None: any age)."""
     value, when = _topics.get(topic, (None, 0.0))
-    return value if time.time() - when < FRESH_S else None
+    return value if max_age_s is None or time.time() - when < max_age_s else None
 
 
 def program_running():
     """True/False from the driver's "a program is running" topic, or None when it is silent."""
     from std_msgs.msg import Bool
     _watch(PROGRAM_TOPIC, Bool)
-    return _fresh(PROGRAM_TOPIC)
+    return _fresh(PROGRAM_TOPIC, max_age_s=None)       # the driver sends it only when it changes
 
 
 def speed_scaling():
-    """The pendant's speed slider as a fraction (0.2 is 20 %), or None when the driver is silent."""
+    """The pendant's speed slider in percent (the UR driver's broadcaster publishes 0 to 100),
+    or None when the driver is silent."""
     from std_msgs.msg import Float64
     _watch(SPEED_TOPIC, Float64)
     return _fresh(SPEED_TOPIC)
@@ -248,8 +255,14 @@ def _rung_address(mode):
     have = addresses(port)
     if config.COMPUTER_IP in [a.split("/")[0] for a in have]:
         return "ok", f"{port} has {config.COMPUTER_IP}.", None, False
-    return ("bad", f"{port} has {', '.join(have) or 'no address'}, not {config.COMPUTER_IP}: "
-            f"bring up the {config.NETWORK_PROFILE} network profile.", "profile", False)
+    has = f"{port} has {', '.join(have) or 'no address'}, not {config.COMPUTER_IP}"
+    if not profile_exists(config.NETWORK_PROFILE):
+        # Making a connection is a one-time job for a person at the machine (NetworkManager
+        # asks the desktop session for permission); after that the button brings it up.
+        return ("bad", f"{has}. No network profile '{config.NETWORK_PROFILE}' yet. Once, in a terminal on this computer:\n"
+                f"nmcli con add type ethernet ifname {port} con-name {config.NETWORK_PROFILE} "
+                f"ipv4.method manual ipv4.addresses {config.COMPUTER_IP}/24", None, True)
+    return "bad", f"{has}: bring up the {config.NETWORK_PROFILE} network profile.", "profile", False
 
 
 def _rung_reachable(mode):
@@ -312,11 +325,11 @@ def _rung_play(mode):
 
 
 def _rung_speed(mode):
-    fraction = speed_scaling()
-    if fraction is None:
+    percent = speed_scaling()
+    if percent is None:
         return "gate", "No speed value from the driver yet.", None, False
-    percent = round(fraction * 100)
-    if fraction <= 0.2:
+    percent = round(percent)
+    if percent <= 20:
         return "ok", f"Speed slider at {percent} %.", None, False
     return "gate", f"Speed slider at {percent} %: set it to 10 to 20 % for a first run.", None, True
 
