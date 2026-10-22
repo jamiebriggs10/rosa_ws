@@ -31,7 +31,30 @@ Built by Jamie Briggs for a University of Strathclyde dissertation, on top of
 | The robot's computer | Ubuntu 22.04 with ROS 2 Humble and MoveIt 2, the robot's own driver and MoveIt launch, `git`, `python3-pip` |
 | Any machine on the same network | [Ollama](https://ollama.com) with a model that can call tools (`ollama pull llama3.1:8b`), set to listen on the network (Ollama app: Settings, "Expose Ollama to the network"; or `OLLAMA_HOST=0.0.0.0 ollama serve`) |
 
-The two can be the same machine.
+The two are usually the same machine: see `--with-ollama` under Install.
+
+## Set up a fresh computer
+
+A computer with nothing on it but Ubuntu 22.04 becomes the robot's computer
+with one script. It is the only step that needs `sudo`:
+
+```bash
+git clone https://github.com/jamiebriggs10/rosa_ws.git ~/rosa_ws
+bash ~/rosa_ws/setup-machine.sh
+```
+
+It installs, in this order, skipping whatever is already there: the base
+tools (`git`, `curl`, `tmux`, Python's venv and pip, `build-essential`), the
+HWE kernel for recent hardware, the NVIDIA open driver if an NVIDIA card is
+found (570 or newer, from the graphics-drivers PPA if Ubuntu's own list stops
+short), ROS 2 Humble with MoveIt and the Universal Robots driver, Docker for
+URSim, and Ollama with the model (`--model NAME`, default `llama3.1:8b`).
+Flags turn steps off: `--no-kernel`, `--no-nvidia`, `--no-docker`,
+`--no-ollama`; `--ssh` adds an SSH server. It refuses to run on anything but
+Ubuntu 22.04, keeps a log in `~/setup-machine.log`, and ends by saying what it
+changed. **If it says reboot, reboot** (a new kernel or graphics driver only
+works after one), then continue with the install below. Read the script top to
+bottom first: it is one function per step, each with a note saying why.
 
 ## Install, on the robot's computer
 
@@ -55,23 +78,57 @@ It ends by printing the address to open. Run it again at any time to update.
 
 Without a service: `install.sh --no-service`, then `~/rosa_ws/run.sh` by hand.
 
+With the model on the same computer: `install.sh --with-ollama` also installs
+Ollama if it is missing (that one step asks for your password) and pulls the
+model (`--model NAME`, default `llama3.1:8b`). The settings default,
+`http://localhost:11434`, then needs no change.
+
 ## Turning it on after that
 
 ```bash
-~/rosa_ws/start.sh
+~/rosa_ws/start.sh          # sim if the settings have robot_start_sim, else real, else console only
+~/rosa_ws/start.sh sim      # the simulator and the robot software against it, then the console
+~/rosa_ws/start.sh real     # the robot software against the real robot, then the console
+~/rosa_ws/start.sh stop     # stop the simulator and the robot software; the console keeps running
 ```
 
-Restarts the console, starts the robot's own software if you have told it how,
-and prints the link. To have it start the robot's software too, put the command
-in `~/.config/rosa_ws/settings.json`:
+Each mode restarts the console and prints the links: `http://localhost:8000`
+on the robot's computer, and its network address for any other machine.
+The robot software comes from three optional keys in
+`~/.config/rosa_ws/settings.json`, each a command or script of your own:
 
-```json
-"robot_start": "~/lab-driver.sh"
+| Key | Runs | tmux session, log |
+|---|---|---|
+| `sim_start` | the simulator itself, for example URSim | `sim`, `~/sim.log` |
+| `robot_start_sim` | your driver and MoveIt against the simulator | `robot`, `~/robot.log` |
+| `robot_start` | your driver and MoveIt against the real robot | `robot`, `~/robot.log` |
+
+`tmux attach -t robot` shows the robot software running (Ctrl-b then d to
+leave it running). Without tmux the command runs in the background instead.
+
+**The real robot is only started by a person in the room.** `start.sh real`
+refuses to run from an SSH session; if you are in the room and the remote
+shell is deliberate, `ROSA_REMOTE_REAL=1 ~/rosa_ws/start.sh real`.
+
+Ready-made scripts for the Strathclyde UR12e cell (the `UR_humble` workspace)
+are in `examples/`, with the settings that name them in
+`examples/settings.example.json`:
+
+- `ur_humble.sim.sh` starts URSim in Docker for a UR12e, powers it on and
+  releases the brakes, launches the lab bringup in sim mode, and moves the
+  simulated arm to the agent's home pose. Because it starts the simulator
+  itself, `sim_start` is left unused; it goes in `robot_start_sim` alone.
+- `ur_humble.real.sh` waits for the real control box, launches the lab
+  bringup without the camera, and keeps the joint controller awake after
+  every Play on the pendant. It goes in `robot_start`.
+
+```bash
+cp ~/rosa_ws/examples/settings.example.json ~/.config/rosa_ws/settings.json
+~/rosa_ws/start.sh          # the simulator, since robot_start_sim is set
 ```
 
-where `lab-driver.sh` is your own few lines: source your workspace, launch your
-driver and MoveIt. It runs in a tmux session called `robot` (`tmux attach -t
-robot` to watch it).
+For another robot, copy one of them and change the sourced workspace and the
+launch line.
 
 ## First run
 
@@ -89,6 +146,28 @@ robot` to watch it).
 If the robot is not a UR12e, first edit the MoveIt section of
 `~/rosa_ws/config.py`: the planning group, the base and tool frame names, and
 the home pose, as its MoveIt config defines them.
+
+## The tool buttons
+
+When the page is opened on the robot's computer itself, a row of buttons
+under the safety limits opens the usual ROS tools on that screen, next to
+the console:
+
+| Button | Opens |
+|---|---|
+| RViz | `rviz2`, with the file named by `"rviz_config"` in `settings.json` if there is one |
+| Node graph | `rqt_graph`: which nodes talk to which |
+| ROS logs | `rqt_console`: every node's log lines |
+| rqt | `rqt`: plots, topic monitor, the rest of the rqt plugins |
+| Terminal | a terminal with ROS and your workspaces already loaded |
+| Record session | `ros2 bag record` of every topic except images and point clouds, into `sessions/bag-<date>`; press again to stop |
+
+The page only ever sends a button's name; the commands live in
+`desktop_tools.py` and nothing else can be started from the page. Buttons
+that need a screen are hidden when the console has none, for example when the
+page is opened from another computer; `start.sh` hands the screen to the
+console service, so run it from a terminal on the robot's computer's own
+desktop. Each press is a line in the session table.
 
 ## Letting the model use the robot system's own nodes
 
@@ -156,7 +235,10 @@ added the same way, one tool per type, never per node.
 | `generic_tools.py` | the tools for the system's own services and topics |
 | `rosa_agent.py` | builds the ROSA agent; `python rosa_agent.py` is a terminal version |
 | `web_console.py`, `static/` | the browser console |
-| `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on |
+| `setup-machine.sh` | the once-only sudo steps for a fresh Ubuntu 22.04 computer |
+| `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on (`sim`, `real`, `stop`) |
+| `desktop_tools.py` | the tool buttons: the fixed list of programs the console may open |
+| `examples/` | the description file and the start scripts for the Strathclyde UR12e cell |
 | `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator |
 
 ## Attribution and citing
