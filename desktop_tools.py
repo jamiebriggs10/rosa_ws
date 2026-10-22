@@ -32,7 +32,7 @@ _RECORD = ["ros2", "bag", "record", "-a", "-x", "(.*)(image|points|cloud|compres
 TOOLS = {
     "rviz": Tool("RViz", ["rviz2"], True),
     "graph": Tool("Node graph", ["rqt_graph"], True),
-    "logs": Tool("ROS logs", ["rqt_console"], True),
+    "logs": Tool("ROS logs", ["ros2", "run", "rqt_console", "rqt_console"], True),   # no plain rqt_console on the PATH
     "rqt": Tool("rqt", ["rqt"], True),
     "terminal": Tool("Terminal", _TERMINAL, True),
     "record": Tool("Record session", _RECORD, False),
@@ -98,6 +98,12 @@ def start(name):
     env = os.environ.copy()                               # ROS and the workspaces come with it
     if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
         env["DISPLAY"] = ":0"                             # the first screen, when nothing names one
+    if not env.get("XAUTHORITY"):
+        # X11 only lets a program open a window if it holds the session's authority file. Under
+        # GDM (Ubuntu's login screen) that file sits here rather than in the home folder.
+        gdm = pathlib.Path(f"/run/user/{os.getuid()}/gdm/Xauthority")
+        if gdm.exists():
+            env["XAUTHORITY"] = str(gdm)
     if name == "record":
         SESSIONS_DIR.mkdir(exist_ok=True)
     # Its own session, so stopping the console (or a Ctrl-C in its terminal) does not take it down.
