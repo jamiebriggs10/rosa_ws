@@ -9,7 +9,7 @@
 # Everything runs in the foreground so the tmux session keeps the log; the script ends when
 # the bringup ends (start.sh stop). Written for the UR_humble cell: edit the launch line for
 # another robot.
-set -uo pipefail          # not -e: a wait that times out is reported, not fatal
+set -o pipefail           # not -e (a wait that times out is reported, not fatal) and not -u (ROS's setup.bash trips on it)
 export ROS_LOCALHOST_ONLY=1       # keep our ROS graph on this computer (other laptops on the lab network run ROS too)
 source /opt/ros/humble/setup.bash
 source "$HOME/UR_humble/install/setup.bash"
