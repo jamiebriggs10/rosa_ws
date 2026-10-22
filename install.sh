@@ -4,10 +4,13 @@
 #   curl -fsSL https://raw.githubusercontent.com/jamiebriggs10/rosa_ws/main/install.sh | bash
 #
 # or, from a clone:  ./install.sh [--workspace ~/my_robot_ws/install/setup.bash]... [--no-service]
+#                                 [--with-ollama] [--model NAME]
 #
 # It clones (or updates) ~/rosa_ws, makes a Python venv, installs the three packages,
 # writes a settings file, and starts the console as a user service on port 8000.
-# It never touches the robot's own workspace and never needs sudo.
+# It never touches the robot's own workspace and never needs sudo, except that
+# --with-ollama also installs Ollama on this computer (that one step asks for your
+# password) and pulls the model named by --model (default llama3.1:8b).
 set -euo pipefail
 
 REPO="${ROSA_REPO:-https://github.com/jamiebriggs10/rosa_ws.git}"
@@ -17,12 +20,16 @@ CONF="$HOME/.config/rosa_ws"
 UNIT_DIR="$HOME/.config/systemd/user"
 WORKSPACES=()
 SERVICE=1
+OLLAMA=0
+MODEL="llama3.1:8b"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --workspace) WORKSPACES+=("$2"); shift 2 ;;
     --no-service) SERVICE=0; shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    --with-ollama) OLLAMA=1; shift ;;
+    --model) MODEL="$2"; shift 2 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1 (try --help)"; exit 2 ;;
   esac
 done
@@ -62,6 +69,19 @@ set -u
 # shellcheck disable=SC2086
 [ -x "$DIR/venv/bin/python" ] || python3 -m venv --system-site-packages $VENV_OPTS "$DIR/venv"
 "$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check -r "$DIR/requirements.txt"
+
+if [ "$OLLAMA" = 1 ]; then
+  say "Ollama on this computer"
+  # Ollama serves the model at http://localhost:11434, which is the settings default.
+  if command -v ollama >/dev/null; then
+    echo "  already installed ($(ollama --version 2>/dev/null | head -1))"
+  else
+    echo "  Installing with Ollama's own installer. This step asks for your password (sudo)."
+    curl -fsSL https://ollama.com/install.sh | sh
+  fi
+  echo "  Pulling the model $MODEL (several gigabytes the first time)"
+  ollama pull "$MODEL"
+fi
 
 say "Settings in $CONF/settings.json"
 mkdir -p "$CONF"
@@ -119,6 +139,11 @@ else
   say "Not installing a service (--no-service). Start the console with:  $DIR/run.sh"
 fi
 
-say "Done. Open http://${IP:-<ip-of-this-computer>}:8000 from the machine that runs Ollama."
-echo "    On that page: Settings, enter the Ollama address, pick a model, and type a command."
+if [ "$OLLAMA" = 1 ]; then
+  say "Done. Open http://localhost:8000 on this computer (or http://${IP:-<ip-of-this-computer>}:8000 from another)."
+  echo "    On that page: Settings, pick the model $MODEL, and type a command."
+else
+  say "Done. Open http://${IP:-<ip-of-this-computer>}:8000 from the machine that runs Ollama."
+  echo "    On that page: Settings, enter the Ollama address, pick a model, and type a command."
+fi
 echo "    Next time, to turn everything on:  $DIR/start.sh"
