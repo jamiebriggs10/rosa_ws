@@ -1,0 +1,7 @@
+{
+  "ollama_url": "http://localhost:11434",
+  "model": "llama3.1:8b",
+  "workspaces": ["~/UR_humble/install/setup.bash"],
+  "robot_start_sim": "~/rosa_ws/examples/ur_humble.sim.sh",
+  "robot_start": "~/rosa_ws/examples/ur_humble.real.sh"
+}
