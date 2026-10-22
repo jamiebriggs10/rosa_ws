@@ -145,6 +145,7 @@ class VoiceLink:
             with self._lock:
                 self._sock = sock
             self.latest["running"] = True
+            self.latest["error"] = self.latest["loading"] = ""   # a fresh start: the old run's problems are gone
             self._sync()
             self._read(resp)
         finally:

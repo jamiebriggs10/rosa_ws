@@ -142,6 +142,15 @@ def test_events_fill_latest_and_call_back(fake, monkeypatch):
     assert latest["running"] is False                    # the stream has ended
 
 
+def test_a_fresh_connection_clears_an_old_error(fake):
+    """The voice app was restarted (say, after a microphone fix): its old error must not linger."""
+    app = fake([("state", {"state": "idle", "t": 0.0})])
+    link = voice.VoiceLink(url=lambda: app.url)
+    link.latest["error"], link.latest["loading"] = "no input device matching 'Jabra'", "loading stt: parakeet…"
+    link.listen_once()
+    assert link.latest["error"] == "" and link.latest["loading"] == ""
+
+
 def test_stream_ignores_comments_and_bad_json(fake):
     app = fake([], raw_lines=[": keep-alive\n\n", "event: final\ndata: {nope\n\n",
                               "event: final\ndata: {\"text\": \"ok\", \"outcome\": \"silence\"}\n\n"])
