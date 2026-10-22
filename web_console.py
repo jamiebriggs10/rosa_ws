@@ -43,6 +43,7 @@ import desktop_tools
 import generic_tools
 import robot_link
 import robot_tools
+import voice
 
 CONFIRM_TIMEOUT_S = 60
 SESSIONS_DIR = pathlib.Path(__file__).parent / "sessions"
@@ -70,6 +71,7 @@ class Console:
         self._answered = threading.Event()
         self.started = datetime.datetime.now()
         self.saved = self._load_saved()       # moves kept for re-running, survive restarts
+        self.voice_stopped = False            # a spoken "stop" has already stopped the arm for this utterance
         robot_tools.set_confirm_handler(self.ask_operator)
 
     # -- the operator gate ---------------------------------------------------
@@ -89,21 +91,25 @@ class Console:
         return False
 
     # -- commands ------------------------------------------------------------
-    def submit(self, text):
-        """Start a command for the model. Returns False if one is already running."""
-        return self._start(text, self._ask_model, text)
+    def submit(self, text, via=None):
+        """Start a command for the model. Returns False if one is already running.
+        `via` says where the words came from ("voice"); typed text has none."""
+        return self._start(text, self._ask_model, text, via)
 
     def rerun(self, label, tool, args):
         """Run a move again straight through its tool: no model, but every safety check."""
         return self._start(f"Run again: {label}", lambda: self._call_tool(tool, args), None)
 
-    def _start(self, shown_text, work, command):
+    def _start(self, shown_text, work, command, via=None):
         with self._lock:
             if self.busy:
                 return False
             self.busy, self.busy_since = True, time.time()
-        self.messages.append({"who": "you", "text": shown_text})
-        thread = threading.Thread(target=self._run, args=(shown_text, work, command), daemon=True)
+        message = {"who": "you", "text": shown_text}
+        if via:
+            message["via"] = via
+        self.messages.append(message)
+        thread = threading.Thread(target=self._run, args=(shown_text, work, command, via), daemon=True)
         self._current = thread
         thread.start()
         return True
@@ -116,7 +122,7 @@ class Console:
     def _call_tool(self, tool, args):
         return getattr(robot_tools, tool).invoke(args)
 
-    def _run(self, shown_text, work, command):
+    def _run(self, shown_text, work, command, via=None):
         t0 = time.time()
         robot_tools.mark_command_time()
         robot_tools.events.clear()
@@ -134,7 +140,7 @@ class Console:
         self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": total,
                               "command": command})
         self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
-                             "think": config.THINK, "command": shown_text, "events": events,
+                             "think": config.THINK, "command": shown_text, "via": via or "typed", "events": events,
                              "total_s": total, "reply": reply})
         self._current = None
         self.busy = False
@@ -284,27 +290,73 @@ class Console:
                               "events": [], "total_s": 0})
         return True
 
-    def stop(self):
-        """The red button: cancel a pending card and the motion, bypassing the model."""
+    def stop(self, note=None):
+        """The red button: cancel a pending card and the motion, bypassing the model.
+        `note` is put in front of the message when something other than the button asked."""
         if self.pending:
             self.answer(self.pending["id"], False)
         message = robot_tools.stop.invoke({})
-        self.messages.append({"who": "robot", "text": message, "events": [], "total_s": 0})
+        self.messages.append({"who": "robot", "text": f"{note} {message}" if note else message, "events": [], "total_s": 0})
         return message
+
+    # -- voice -----------------------------------------------------------------
+    def heard(self, text, partial=False):
+        """Spoken text from the voice app (voice.py). Works out what it means and returns one
+        word saying what was done, which the voice pop-up shows: off, empty, ignored, stopped,
+        swallowed, confirmed, cancelled, sent or busy. Only "stop" bypasses the model; every
+        other command goes the way typed text goes, through submit() and the tools' checks.
+        `partial` is live text while the person is still speaking: watched for "stop" only."""
+        text = (text or "").strip()
+        if not config.VOICE_ON:
+            return "off"
+        if not text:
+            return "empty"
+        if voice.is_stop(text):
+            if self.voice_stopped:
+                return "swallowed"             # the partial already stopped the arm for this utterance
+            self.voice_stopped = True
+            try:
+                self.stop(note="Stopped by voice.")
+            except Exception as exc:           # no robot, or the stop topic is missing
+                self.messages.append({"who": "robot", "text": f"Stopped by voice, but the stop failed: {exc}",
+                                      "events": [], "total_s": 0})
+            return "stopped"
+        if partial:
+            return "ignored"
+        pending = self.pending
+        if pending and config.VOICE_CONFIRM:
+            if voice.says_yes(text) and self.answer(pending["id"], True):
+                return "confirmed"
+            if voice.says_no(text) and self.answer(pending["id"], False):
+                return "cancelled"
+        if self.submit(text, via="voice"):
+            return "sent"
+        if self.pending:
+            note = (f"Heard “{text}”, but a confirm card is waiting. Answer it on screen, or turn voice "
+                    "confirm on in the voice pop-up.")
+        else:
+            note = f"Heard “{text}” but the model is still busy. Say it again when it has finished."
+        self.messages.append({"who": "robot", "text": note, "events": [], "total_s": 0})
+        return "busy"
+
+    def voice_idle(self):
+        """The voice app is back to idle: the next utterance may stop the arm again."""
+        self.voice_stopped = False
 
     # -- session file --------------------------------------------------------
     def finish(self):
         SESSIONS_DIR.mkdir(exist_ok=True)
         path = SESSIONS_DIR / self.started.strftime("%Y-%m-%d-%H%M.md")
         lines = [f"# Session {self.started:%Y-%m-%d %H:%M}", "",
-                 "| Time | Model | Thinking | Command | Tool calls | First tool after | To motion | Total | Reply |",
-                 "|---|---|---|---|---|---|---|---|---|"]
+                 "| Time | Model | Thinking | Command | Via | Tool calls | First tool after | To motion | Total | Reply |",
+                 "|---|---|---|---|---|---|---|---|---|---|"]
         for r in self.records:
             calls = "; ".join(f"{e['tool']} {e['args']} ({e['outcome']})" for e in r["events"]) or "none"
             motion = ", ".join(f"{e['to_motion_s']} s" for e in r["events"] if "to_motion_s" in e) or ""
             reply = r["reply"].replace("\n", " ").replace("|", "/")
             first = f"{r['events'][0]['after_s']} s" if r["events"] and "after_s" in r["events"][0] else ""
-            lines.append(f"| {r['time']} | {r['model']} | {'on' if r.get('think') else 'off'} | {r['command']} | {calls} | {first} | {motion} | {r['total_s']} s | {reply} |")
+            lines.append(f"| {r['time']} | {r['model']} | {'on' if r.get('think') else 'off'} | {r['command']} | "
+                         f"{r.get('via', 'typed')} | {calls} | {first} | {motion} | {r['total_s']} s | {reply} |")
         path.write_text("\n".join(lines) + "\n")
         return {"path": str(path), "records": self.records}
 
