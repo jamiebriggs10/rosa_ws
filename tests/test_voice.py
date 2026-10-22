@@ -203,6 +203,12 @@ def test_request_raises_when_unreachable():
     assert link.latest["running"] is False
 
 
+def test_request_treats_a_broken_address_as_unavailable():
+    link = voice.VoiceLink(url=lambda: "http")          # passes a "starts with http" check, but is no address
+    with pytest.raises(voice.VoiceUnavailable):
+        link.request("GET", "/status")
+
+
 def test_request_returns_http_errors_not_raises(fake):
     app = fake([])
     app.post_status["/presets/x"] = (409, {"error": "preset x exists"})

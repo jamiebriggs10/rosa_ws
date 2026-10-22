@@ -39,6 +39,7 @@ import pathlib
 import re
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -78,6 +79,7 @@ class Console:
         self.started = datetime.datetime.now()
         self.saved = self._load_saved()       # moves kept for re-running, survive restarts
         self.voice_stopped = False            # a spoken "stop" has already stopped the arm for this utterance
+        self._via = None                      # where the running command came from ("voice"), for its record
         robot_tools.set_confirm_handler(self.ask_operator)
 
     # -- the operator gate ---------------------------------------------------
@@ -114,6 +116,7 @@ class Console:
         message = {"who": "you", "text": shown_text}
         if via:
             message["via"] = via
+        self._via = via                       # so a command stopped half-way is still recorded as spoken
         self.messages.append(message)
         thread = threading.Thread(target=self._run, args=(shown_text, work, command, via), daemon=True)
         self._current = thread
@@ -186,7 +189,7 @@ class Console:
             pass
         waited = round(time.time() - self.busy_since, 1)
         self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
-                             "think": config.THINK, "command": self.messages[-1]["text"],
+                             "think": config.THINK, "command": self.messages[-1]["text"], "via": self._via or "typed",
                              "events": list(robot_tools.events), "total_s": waited, "reply": "(stopped by the operator)"})
         self._current = None
         self._agent = None                    # the old one is still busy; start the next command afresh
@@ -735,13 +738,15 @@ def voice_confirm():
 @app.post("/voice/url")
 def voice_url():
     url = (request.json or {}).get("url", "")
-    if not isinstance(url, str) or not url.startswith("http"):
+    if not isinstance(url, str) or not url.startswith("http") or not urllib.parse.urlsplit(url).hostname:
         return jsonify(error="The address must start with http://, e.g. http://127.0.0.1:8100"), 400
     url = url.rstrip("/")
     try:
-        voice_link.request("GET", "/status", base=url)
+        status, body = voice_link.request("GET", "/status", base=url)
     except voice.VoiceUnavailable as exc:
         return jsonify(error=str(exc)), 502
+    if status != 200 or "state" not in body:   # something answered (Ollama? this console?), but not the voice app
+        return jsonify(error=f"{url} answered, but it is not the voice app."), 400
     config.save_settings({"voice_url": url})
     voice_link.reconnect()                    # the listening thread picks the new address up at once
     return jsonify(ok=True, url=url)

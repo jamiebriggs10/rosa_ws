@@ -707,6 +707,7 @@ $("robot-recheck").onclick = () => robotSetMode(robotMode);
 // console's /voice/* routes, when the dialog opens, and redrawn only then and after an option
 // changes, so a poll never pulls a control out from under a click.
 let voiceOn = false, voiceKey = null, voiceUrlFilled = false, voiceSettings = null, voiceOptions = null;
+let voiceMessage = "";       // the voice app's last refusal (a 400 on a setting, say); shown until the next success
 let voiceHelp = {stages: {}, options: {}, knobs: {}};         // plain-English help from the voice app's help.json
 const VOICE_STAGES = ["trigger", "vad", "endpoint", "stt"];
 const VOICE_STAGE_TITLES = {trigger: "when to start listening", vad: "is someone speaking?",
@@ -729,15 +730,15 @@ function showVoice(v) {
   $("voice-text").textContent = text;
   if (!voiceUrlFilled && v.url) { $("voice-url").value = v.url; voiceUrlFilled = true; }
   if (!$("voice-dialog").open) return;
-  const key = JSON.stringify(v);
+  const key = JSON.stringify([v, voiceMessage]);
   if (key === voiceKey) return;
   voiceKey = key;
   $("voice-on-btn").className = v.on ? "sel" : ""; $("voice-off-btn").className = v.on ? "" : "sel";
   const pill = $("voice-state"); pill.className = "pill " + lamp; pill.textContent = text.replace("Voice on, ", "").replace("Voice ", "");
   const alert = $("voice-alert");
-  const problem = !v.running
+  const problem = voiceMessage || (!v.running
     ? `The voice app is not answering at ${v.url}. Start it (start.sh with "voice_start" set, or its app.py); this page finds it by itself.`
-    : (v.error || "");
+    : (v.error || ""));
   alert.hidden = !(problem || v.loading);
   alert.className = "alert " + (problem ? "bad" : "wait"); alert.textContent = problem || v.loading || "";
   $("voice-level").style.width = Math.min(100, Math.round((v.level || 0) * 400)) + "%";
@@ -763,7 +764,7 @@ $("voice-toggle").onclick = () => setVoice(!voiceOn);
 $("voice-on-btn").onclick = () => setVoice(true);
 $("voice-off-btn").onclick = () => setVoice(false);
 $("voice-settings").onclick = () => {
-  voiceKey = null;
+  voiceKey = null; voiceMessage = "";
   $("voice-dialog").showModal();
   if (lastState && lastState.voice) showVoice(lastState.voice);
   loadVoiceSettings();
@@ -786,11 +787,14 @@ async function vapi(path, method, body) {                    // one request to t
   if (!r.ok) { const e = new Error(data.error || r.statusText); e.status = r.status; throw e; }
   return data;
 }
-function voiceProblem(msg) { const a = $("voice-alert"); a.hidden = false; a.className = "alert bad"; a.textContent = msg; }
+// A refusal from the voice app stays on screen (through the one-second redraws) until the next success.
+function voiceProblem(msg) { voiceMessage = msg; voiceKey = null; if (lastState && lastState.voice) showVoice(lastState.voice); }
+function voiceFine() { if (voiceMessage) { voiceMessage = ""; voiceKey = null; } }
 async function loadVoiceSettings() {
   try {
     const [o, s, help, presets] = await Promise.all([vapi("options"), vapi("settings"), vapi("help").catch(() => ({})),
                                                      vapi("presets").catch(() => [])]);
+    voiceFine();
     voiceOptions = o.options; voiceSettings = s;
     voiceHelp = {stages: help.stages || {}, options: help.options || {}, knobs: help.knobs || {}};
     renderVoiceStages();
@@ -815,6 +819,7 @@ async function voiceFlush() {
   const body = voicePatch; voicePatch = {};
   try {
     voiceSettings = await vapi("settings", "POST", body);
+    voiceFine();
     $("voice-saved").textContent = "saved, applies to the next thing you say";
     setTimeout(() => { $("voice-saved").textContent = ""; }, 3000);
   } catch (e) { voiceProblem("Voice settings: " + e.message); loadVoiceSettings(); }

@@ -97,13 +97,13 @@ class VoiceLink:
         where = (base or self.url).rstrip("/")
         data = json.dumps(body if body is not None else {}).encode() if method == "POST" else None
         headers = {"Content-Type": "application/json"} if data is not None else {}
-        req = urllib.request.Request(where + path, data=data, method=method, headers=headers)
         try:
+            req = urllib.request.Request(where + path, data=data, method=method, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout_s) as r:
                 return r.status, _json(r)
         except urllib.error.HTTPError as e:
             return e.code, _json(e)
-        except OSError as e:                   # connection refused, timeout, no such host
+        except (OSError, ValueError) as e:     # connection refused, timeout, no such host, or not an address at all
             if base is None:
                 self.latest["running"] = False
             raise VoiceUnavailable(f"The voice app is not answering at {where}.") from e

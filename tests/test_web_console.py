@@ -501,9 +501,35 @@ def test_bad_voice_url_is_refused(client, monkeypatch):
         raise web_console.voice.VoiceUnavailable(f"The voice app is not answering at {base}.")
     monkeypatch.setattr(web_console.voice_link, "request", unreachable)
     assert client.post("/voice/url", json={"url": "ten dot two"}).status_code == 400
+    assert client.post("/voice/url", json={"url": "http"}).status_code == 400          # no host at all
     r = client.post("/voice/url", json={"url": "http://10.0.0.2:8100"})
     assert r.status_code == 502 and "not answering" in r.get_json()["error"]
     assert web_console.config.VOICE_URL == "http://127.0.0.1:8100"
+
+
+def test_reachable_but_wrong_voice_url_is_refused(client, monkeypatch):
+    """Ollama or the console itself answer on their ports, but they are not the voice app."""
+    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
+    monkeypatch.setattr(web_console.voice_link, "request",
+                        lambda method, path, body=None, timeout_s=3.0, base=None: (404, {"error": "no such page"}))
+    r = client.post("/voice/url", json={"url": "http://127.0.0.1:11434"})
+    assert r.status_code == 400 and "not the voice app" in r.get_json()["error"]
+    assert web_console.config.VOICE_URL == "http://127.0.0.1:8100"
+
+
+def test_cancelled_spoken_command_keeps_its_via(client, voice_on):
+    started, release = threading.Event(), threading.Event()
+
+    def slow():
+        started.set()
+        release.wait(2)
+        return "late"
+    client.agent.action = slow
+    assert web_console.console.heard("move up") == "sent"
+    started.wait(1)
+    assert client.post("/cancel").status_code == 200
+    assert web_console.console.records[-1]["via"] == "voice"
+    release.set()
 
 
 def test_good_voice_url_is_saved_and_reconnects(client, monkeypatch):
