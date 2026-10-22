@@ -107,14 +107,17 @@
   .scroll { flex: 1; overflow-y: auto; }
   main { padding: 16px; }
 
-  /* The safety limits, always on show under the header */
-  .limits { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 16px;
+  /* The safety limits, always on show under the header, and the row of tool buttons under them */
+  .limits, .tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 16px;
     background: var(--panel); border-bottom: 1px solid var(--line); font-size: 13px; }
-  .limits .label { font-weight: 600; margin-right: 4px; }
+  .limits .label, .tools .label { font-weight: 600; margin-right: 4px; }
   .limits .chip { background: var(--bg); border-radius: 999px; padding: 2px 10px; }
   .limits .chip b { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; }
-  .limits button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
+  .limits button, .tools button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
     background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tools[hidden] { display: none; }
+  .tools button.on { border-color: var(--ok); color: var(--ok); }     /* the tool is open or recording */
+  .tools a { color: var(--action); margin-left: 8px; }
   .limits form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; flex-basis: 100%; padding-top: 6px; }
   .limits form[hidden] { display: none; }
   .limits form label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
@@ -210,7 +213,6 @@
     <span id="s-ollama">Model</span>
     <span id="s-moveit">MoveIt</span>
     <span id="s-joint_states">Joint states</span>
-    <a id="pendant" target="_blank" hidden>Open pendant</a>
     <span class="hint" id="hint" hidden></span>
   </div>
   <button id="reset" type="button" title="Make the model forget this conversation, e.g. after it gets confused">New conversation</button>
@@ -223,6 +225,13 @@
   <span id="limits-chips"></span>
   <button id="limits-edit" type="button">Change</button>
   <form id="limits-form" hidden></form>
+</div>
+
+<!-- Tools the console can open on its own computer (RViz, rqt, a terminal, a bag recorder). Hidden when none can run. -->
+<div class="tools" id="tools" hidden>
+  <span class="label">Tools</span>
+  <span id="tools-buttons"></span>
+  <a id="pendant" target="_blank" hidden>Open pendant</a>
 </div>
 
 <div class="scroll" id="scroll">
@@ -461,7 +470,8 @@ async function refresh() {
     shownPathKey = pathKey;
     if (pathKey) window.showPath(s.shown_path.points_cm, s.shown_path.topic); else window.clearPath();
   }
-  $("hint").hidden = !s.status.hint; $("hint").textContent = s.status.hint || "";
+  const hint = Date.now() < toolHintUntil ? toolHint : (s.status.hint || "");   // a tool error shows for 4 s
+  $("hint").hidden = !hint; $("hint").textContent = hint;
   if (!ollamaFilled && s.ollama_url) { $("ollama-url").value = s.ollama_url; ollamaFilled = true; }
   if (s.status.hint && !s.status.ollama && !helpAutoClosed) $("settings-panel").open = true;
   if (window.showLive) window.showLive(s.status.joints);
@@ -476,8 +486,40 @@ async function refresh() {
   $("think").checked = s.think;
   $("think").disabled = s.busy || !modelThinks[s.model];
   showSaved(s.saved || []);
+  showTools(s.tools || [], !!s.pendant);
   lastState = s;
   showLimits(s);
+}
+
+// The tool buttons, one per tool that can run on the console's computer. They are rebuilt
+// only when the list changes, so a poll never redraws a button someone is about to click.
+// Only Record toggles ("Stop recording"); the others simply reopen if closed.
+let toolsKey = null, toolHint = "", toolHintUntil = 0;
+function showTools(tools, pendant) {
+  const usable = tools.filter(t => t.available);
+  $("tools").hidden = usable.length === 0 && !pendant;
+  const key = JSON.stringify(tools);
+  if (key === toolsKey) return;
+  toolsKey = key;
+  const box = $("tools-buttons"); box.innerHTML = "";
+  for (const t of usable) {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.tool = t.name;
+    const stops = t.name === "record" && t.running;
+    b.textContent = stops ? "Stop recording" : t.label;
+    if (t.running) { b.classList.add("on"); b.title = "running"; }
+    b.onclick = () => pressTool(t.name, stops);
+    box.appendChild(b);
+  }
+}
+async function pressTool(name, stop) {
+  let r;
+  try { r = await fetch(`/tools/${name}` + (stop ? "/stop" : ""), {method: "POST"}); } catch { return; }
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    toolHint = data.error || "Something went wrong"; toolHintUntil = Date.now() + 4000;
+    $("hint").hidden = false; $("hint").textContent = toolHint;
+  }
+  refresh();
 }
 
 // The joint list comes from config.py, so it matches whatever robot is connected.

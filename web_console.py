@@ -21,6 +21,9 @@ One Flask app, one page (static/index.html), and these JSON endpoints:
   GET  /capabilities         what the robot's system offers (discovery + the description file)
   POST /capabilities/rescan  read the graph and the description file again
   POST /ollama   {"url": ...}  test an Ollama address, save it, and list its models
+  GET  /tools              the tool buttons (RViz, rqt, a terminal, a bag recorder) and their state
+  POST /tools/<name>       open that tool on the console's own computer (404 unknown, 409 cannot run here)
+  POST /tools/<name>/stop  close it (SIGINT first, so a recording's bag file is closed properly)
 """
 import datetime
 import json
@@ -33,6 +36,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from langchain_core.messages import HumanMessage
 
 import config
+import desktop_tools
 import generic_tools
 import robot_tools
 
@@ -140,7 +144,7 @@ class Console:
         words: small models copy whatever they appear to have said before, and were seen
         writing fake "record" lines claiming moves that never happened."""
         history = getattr(self._agent, "chat_history", None)
-        moves = [e for e in events if e["tool"] != "stop"]
+        moves = [e for e in events if e["tool"] not in ("stop", "tool")]   # not the stop button or the tool buttons
         if history is None or not moves:
             return
         lines = []
@@ -201,6 +205,14 @@ class Console:
                              "total_s": 0, "reply": ""})
         self._remember_settings()
         return None
+
+    def note_tool(self):
+        """A tool button was pressed: one line in the session table, like a limits change.
+        desktop_tools has just recorded the press in robot_tools.events, so the last one is it."""
+        event = robot_tools.events[-1]
+        self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
+                             "think": config.THINK, "command": f"({event['message']})", "events": [event],
+                             "total_s": 0, "reply": ""})
 
     def new_conversation(self):
         """Forget the conversation so far, e.g. after a string of failures has confused the model."""
@@ -382,7 +394,7 @@ def state():
                    pendant=config.PENDANT_URL, joint_list=config.JOINTS, saved=console.saved,
                    limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED,
                    shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
-                   frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME})
+                   frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME}, tools=desktop_tools.rows())
 
 
 @app.get("/pkg/<package>/<path:rel>")
@@ -558,6 +570,38 @@ def unsave():
 @app.post("/stop")
 def stop():
     return jsonify(message=console.stop())
+
+
+# -- the tool buttons: only names cross the network, desktop_tools holds the commands --
+
+@app.get("/tools")
+def tools():
+    return jsonify(tools=desktop_tools.rows())
+
+
+@app.post("/tools/<name>")
+def start_tool(name):
+    if name not in desktop_tools.TOOLS:
+        return jsonify(error=f"There is no tool called {name}."), 404
+    if not desktop_tools.available(name):
+        return jsonify(error=desktop_tools.why_unavailable(name) or f"{name} cannot run here."), 409
+    try:
+        outcome = desktop_tools.start(name)
+    except (RuntimeError, OSError) as exc:          # OSError: the command vanished between the check and the start
+        return jsonify(error=str(exc)), 409
+    if outcome == "started":
+        console.note_tool()
+    return jsonify(ok=True, outcome=outcome, tools=desktop_tools.rows())
+
+
+@app.post("/tools/<name>/stop")
+def stop_tool(name):
+    if name not in desktop_tools.TOOLS:
+        return jsonify(error=f"There is no tool called {name}."), 404
+    stopped = desktop_tools.stop(name)
+    if stopped:
+        console.note_tool()
+    return jsonify(ok=True, stopped=stopped)
 
 
 @app.post("/finish")

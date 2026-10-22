@@ -285,3 +285,16 @@ def test_state_carries_the_last_path(client, monkeypatch):
     assert client.get("/state").get_json()["shown_path"]["topic"] == "/p"
     client.post("/reset")
     assert client.get("/state").get_json()["shown_path"] is None
+
+
+def test_state_carries_tools_and_routes_refuse_unknown(client, monkeypatch):
+    tools = client.get("/state").get_json()["tools"]
+    assert [t["name"] for t in tools][:2] == ["rviz", "graph"]
+    assert set(tools[0]) == {"name", "label", "available", "running"}
+    r = client.post("/tools/nope")
+    assert r.status_code == 404 and "nope" in r.get_json()["error"]
+    monkeypatch.setattr(web_console.desktop_tools, "available", lambda name: False)
+    r = client.post("/tools/rviz")
+    assert r.status_code == 409 and r.get_json()["error"]
+    assert client.post("/tools/nope/stop").status_code == 404
+    assert client.post("/tools/rviz/stop").get_json() == {"ok": True, "stopped": False}   # it was never running

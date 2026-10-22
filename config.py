@@ -109,6 +109,9 @@ LIMIT_CEILINGS = {"MAX_STEP_CM": 50.0, "MAX_PATH_REACH_CM": 80.0, "MAX_JOINT_DEG
 # (tunnelled to the Mac by scripts/sim-up). Empty hides the link.
 PENDANT_URL = os.environ.get("PENDANT_URL", "http://localhost:6080/vnc.html")
 
+# An RViz settings file (.rviz) for the console's RViz button, so it opens showing the
+# robot and the cell. Empty opens RViz with its defaults. Set as "rviz_config" in settings.
+RVIZ_CONFIG = ""
 
 
 def package_share(package):
@@ -136,7 +139,7 @@ def load_settings(path=None):
 def apply_settings(settings):
     """Copy valid values from a settings dict onto this module. Bad values are ignored,
     so a damaged file can never stop the console from starting."""
-    global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES
+    global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES, RVIZ_CONFIG
     url = settings.get("ollama_url")
     if isinstance(url, str) and url.startswith("http"):
         OLLAMA_URL = url.rstrip("/")
@@ -150,6 +153,8 @@ def apply_settings(settings):
         INTERFACES_FILE = pathlib.Path(settings["interfaces_file"]).expanduser()
     if isinstance(settings.get("workspaces"), list):
         WORKSPACES = [w for w in settings["workspaces"] if isinstance(w, str)]
+    if isinstance(settings.get("rviz_config"), str):
+        RVIZ_CONFIG = settings["rviz_config"]
     for name, value in (settings.get("limits") or {}).items():
         if name in LIMIT_CEILINGS and isinstance(value, (int, float)) and not isinstance(value, bool) \
                 and 0 < value <= LIMIT_CEILINGS[name]:
