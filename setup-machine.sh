@@ -137,9 +137,21 @@ ros2_humble() {
 }
 
 docker_engine() {
-  # Docker runs URSim, Universal Robots' own simulator, in a container. Ubuntu's docker.io
-  # package is enough. Being in the "docker" group lets you use it without sudo.
-  apt_install docker.io
+  # Docker runs URSim, Universal Robots' own simulator, in a container. Installed from
+  # Docker's own package source (docker-ce), as the lab asks, not Ubuntu's docker.io or
+  # the snap. Being in the "docker" group lets you use it without sudo.
+  if snap list docker >/dev/null 2>&1; then fail "Docker is installed as a snap; remove it first (sudo snap remove docker) so the Docker package can be used"; fi
+  if installed docker.io; then fail "Ubuntu's docker.io package is installed; remove it first (sudo apt-get remove docker.io) so Docker's own package can be used"; fi
+  if ! installed docker-ce; then
+    $SUDO install -m 0755 -d /etc/apt/keyrings
+    $SUDO curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    $SUDO chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu jammy stable" \
+      | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+    apt_update
+    DONE+=("added Docker's package source")
+  fi
+  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   if id -nG "$ME" | grep -qw docker; then
     echo "  $ME is already in the docker group"
   else

@@ -47,7 +47,7 @@ It installs, in this order, skipping whatever is already there: the base
 tools (`git`, `curl`, `tmux`, Python's venv and pip, `build-essential`), the
 HWE kernel for recent hardware, the NVIDIA open driver if an NVIDIA card is
 found (570 or newer, from the graphics-drivers PPA if Ubuntu's own list stops
-short), ROS 2 Humble with MoveIt and the Universal Robots driver, Docker for
+short), ROS 2 Humble with MoveIt and the Universal Robots driver, Docker (from Docker's own repository, as docker-ce) for
 URSim, and Ollama with the model (`--model NAME`, default `llama3.1:8b`).
 Flags turn steps off: `--no-kernel`, `--no-nvidia`, `--no-docker`,
 `--no-ollama`; `--ssh` adds an SSH server. It refuses to run on anything but
