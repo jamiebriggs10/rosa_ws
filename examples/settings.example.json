@@ -11,5 +11,9 @@
   "computer_ip": "172.31.1.137",
   "robot_port": "",
   "network_profile": "robot",
-  "ursim_ip": "192.168.56.101"
+  "ursim_ip": "192.168.56.101",
+  "voice_url": "http://127.0.0.1:8100",
+  "voice_on": false,
+  "voice_confirm": false,
+  "voice_start": "~/voice/.venv/bin/python ~/voice/app.py"
 }

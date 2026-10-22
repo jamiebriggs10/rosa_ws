@@ -11,6 +11,7 @@
 #   "sim_start"        the simulator itself, e.g. URSim            -> tmux session "sim",   log ~/sim.log
 #   "robot_start_sim"  driver and MoveIt against the simulator     -> tmux session "robot", log ~/robot.log
 #   "robot_start"      driver and MoveIt against the real robot    -> tmux session "robot", log ~/robot.log
+#   "voice_start"      the voice app (optional), started with the console -> tmux session "voice", log ~/voice.log
 # Ready-made scripts for the UR_humble cell are in examples/ (see the README).
 #
 # The real robot is only started by a person in the room: "real" is refused from an SSH
@@ -33,6 +34,7 @@ setting() {
 SIM_START="$(setting sim_start)"
 ROBOT_START_SIM="$(setting robot_start_sim)"
 ROBOT_START="$(setting robot_start)"
+VOICE_START="$(setting voice_start)"
 
 # No argument: pick the mode from what the settings file offers, simulator first.
 if [ -z "$MODE" ]; then
@@ -113,6 +115,17 @@ case "$MODE" in
 esac
 
 if [ "$CONSOLE" = 1 ]; then
+  # The voice app belongs with the console, not the robot software: it is started here, only
+  # when the console itself is being started, and never restarted if it is already running
+  # (restarting it would reload its speech models). The page's own calls pass --no-console.
+  if [ -n "$VOICE_START" ]; then
+    if command -v tmux >/dev/null && tmux has-session -t voice 2>/dev/null; then
+      echo "Voice app: already running (tmux attach -t voice, log $HOME/voice.log)."
+    else
+      echo "Voice app:"
+      run_in_tmux voice "$VOICE_START" "$HOME/voice.log"
+    fi
+  fi
   import_display
   if systemctl --user restart rosa-console 2>/dev/null; then
     echo "Console: restarted (service rosa-console)."
