@@ -48,3 +48,18 @@ def test_save_merges_and_keeps_unknown_keys(tmp_path, monkeypatch):
     assert merged == {"model": "qwen3:8b", "someone_elses_key": 1}
     assert json.loads(f.read_text())["someone_elses_key"] == 1
     assert config.MODEL == "qwen3:8b"
+
+
+def test_voice_settings_are_applied_and_checked(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "VOICE_URL", "http://127.0.0.1:8100", raising=False)
+    monkeypatch.setattr(config, "VOICE_ON", False, raising=False)
+    monkeypatch.setattr(config, "VOICE_CONFIRM", False, raising=False)
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps({"voice_url": "http://10.0.0.2:8100/", "voice_on": True, "voice_confirm": "yes"}))
+    config.apply_settings(config.load_settings(f))
+    assert config.VOICE_URL == "http://10.0.0.2:8100"     # trailing slash dropped
+    assert config.VOICE_ON is True
+    assert config.VOICE_CONFIRM is False                    # a string is not a bool: ignored
+    f.write_text(json.dumps({"voice_url": "ten dot two"}))
+    config.apply_settings(config.load_settings(f))
+    assert config.VOICE_URL == "http://10.0.0.2:8100"      # not a web address: ignored

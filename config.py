@@ -129,6 +129,14 @@ URSIM_IP = "192.168.56.101"
 # robot and the cell. Empty opens RViz with its defaults. Set as "rviz_config" in settings.
 RVIZ_CONFIG = ""
 
+# --- Voice control -----------------------------------------------------------------
+# Speech is handled by a separate program, the voice app (the Voice Control Prototype:
+# wake word or push-to-talk, then speech-to-text). It runs on the same computer as the
+# console and the console listens to it over HTTP (voice.py). All three are settings.
+VOICE_URL = "http://127.0.0.1:8100"   # where the voice app answers
+VOICE_ON = False                       # the header switch: whether spoken words become commands
+VOICE_CONFIRM = False                  # whether a spoken "yes" / "no" may answer the confirm card
+
 
 def package_share(package):
     """The share folder of a ROS package (where meshes and config live), or None.
@@ -157,9 +165,17 @@ def apply_settings(settings):
     so a damaged file can never stop the console from starting."""
     global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES, RVIZ_CONFIG
     global ROBOT_MODE, ROBOT_IP, COMPUTER_IP, ROBOT_PORT, NETWORK_PROFILE, URSIM_IP
+    global VOICE_URL, VOICE_ON, VOICE_CONFIRM
     url = settings.get("ollama_url")
     if isinstance(url, str) and url.startswith("http"):
         OLLAMA_URL = url.rstrip("/")
+    url = settings.get("voice_url")
+    if isinstance(url, str) and url.startswith("http"):
+        VOICE_URL = url.rstrip("/")
+    if isinstance(settings.get("voice_on"), bool):
+        VOICE_ON = settings["voice_on"]
+    if isinstance(settings.get("voice_confirm"), bool):
+        VOICE_CONFIRM = settings["voice_confirm"]
     if isinstance(settings.get("model"), str) and settings["model"]:
         MODEL = settings["model"]
     if isinstance(settings.get("think"), bool):

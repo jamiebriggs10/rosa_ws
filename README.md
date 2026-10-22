@@ -102,6 +102,7 @@ The robot software comes from three optional keys in
 | `sim_start` | the simulator itself, for example URSim | `sim`, `~/sim.log` |
 | `robot_start_sim` | your driver and MoveIt against the simulator | `robot`, `~/robot.log` |
 | `robot_start` | your driver and MoveIt against the real robot | `robot`, `~/robot.log` |
+| `voice_start` | the voice app (see *Voice control*), started with the console, left running by `stop` | `voice`, `~/voice.log` |
 
 `tmux attach -t robot` shows the robot software running (Ctrl-b then d to
 leave it running). Without tmux the command runs in the background instead.
@@ -174,6 +175,55 @@ computer's own screen, the same rule as `start.sh real`. Nothing on this panel
 moves the arm; Play, the speed slider, protective stops and the e-stop stay on
 the pendant on purpose. The model has a read-only `robot_status` tool with the
 same ladder, so "is the robot ready?" gets a true answer.
+
+## Voice control
+
+Speech is handled by a separate program, the **voice app** (the Voice Control
+Prototype: wake word or push-to-talk, then speech-to-text, with every stage
+swappable for the dissertation's comparisons). It runs on the same computer
+as the console, on port 8100, with its own settings file. The console listens
+to it; the voice app never talks to the robot.
+
+Next to the robot widget there is a **Voice** pill and a gear. The pill is the
+switch: click it to turn voice control on or off (grey "Voice off"; green
+"Voice on, idle"; amber while armed or listening). The gear opens the voice
+pop-up: the same switch, a microphone level bar, the live text as it is
+heard with the felt delay in milliseconds, a *Hold to talk* button, and then
+every setting of the voice app (device; for each of trigger, VAD, end of turn
+and speech-to-text the option in force and its knobs, each with a "What is
+this?"), presets to load and save, the voice app's address, and the
+voice-confirm checkbox. Settings changes are saved by the voice app in its
+`settings.yaml` and apply to the next thing you say.
+
+With voice on, what you say arrives in the chat as a command, marked with a
+🎤, and the model treats it exactly like typed text: the same tools, the same
+safety checks, the same confirm card. Two things are different:
+
+- **"Stop"** (or "halt", "freeze", on its own) halts the arm at once, without
+  the model. With a streaming speech-to-text engine this happens on the live
+  text, before you have finished the word.
+- **Voice confirm** is off by default: a confirm card is answered on screen.
+  Tick the box in the pop-up and a spoken "yes" (or "confirm", "go",
+  "go ahead", "do it", "okay") confirms the card and "no" or "cancel" cancels
+  it. It is off by default because a misheard "yes" would move the arm.
+
+If the model is still busy when you speak, nothing is queued: the chat says
+what was heard and asks you to say it again. The session table and the
+summary have a *Via* column (typed or voice).
+
+The settings in `settings.json`: `voice_url` (default `http://127.0.0.1:8100`),
+`voice_on`, `voice_confirm`, and `voice_start`, the command that starts the
+voice app (`start.sh` runs it in tmux session `voice` alongside the console
+and leaves it alone if it is already running; `tmux kill-session -t voice`
+stops it; its output is in `~/voice.log`).
+
+Getting the voice app onto the robot's computer: copy its folder (including
+the git-ignored `models/`, the downloaded speech models) to, say, `~/voice`,
+make a venv from its `requirements/nvidia.txt` (or `mac.txt`), and leave
+`device: auto` in its `settings.yaml`; its `docs/03-portability.md` has the
+moving-day checklist. The voice app is kept separate on purpose: its speech
+libraries are heavy, its benchmark harness does not need ROS, and the console
+only needs its HTTP side (`voice.py` is the whole link).
 
 ## The tool buttons
 
@@ -267,6 +317,7 @@ added the same way, one tool per type, never per node.
 | `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on (`sim`, `real`, `stop`) |
 | `desktop_tools.py` | the tool buttons: the fixed list of programs the console may open |
 | `robot_link.py` | the robot-connection ladder: the checks, the actions, the `robot_status` tool |
+| `voice.py` | the link to the voice app: its event stream, the word tests ("stop", "yes", "no"), the proxied requests |
 | `examples/` | the description file and the start scripts for the Strathclyde UR12e cell |
 | `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator |
 

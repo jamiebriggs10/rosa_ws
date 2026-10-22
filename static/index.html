@@ -182,6 +182,52 @@
   #robot-dialog .foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   #robot-dialog .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
 
+  /* Voice control: the header switch and gear, the pop-up, and the voice app's settings it draws */
+  .gear { width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; margin-left: -10px; }
+  .lamp.off { background: #9aa5b1; } .lamp.wait { background: var(--gate); } .lamp.busy { background: var(--action); }
+  #voice-dialog { max-width: 820px; max-height: 92vh; overflow: auto; }
+  #voice-dialog .head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+  #voice-dialog .head h2 { font-size: 17px; margin: 0 auto 0 0; }
+  #voice-dialog .mode { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  #voice-dialog .mode button { border: none; border-radius: 0; padding: 4px 12px; font-size: 13px; color: var(--muted); }
+  #voice-dialog .mode button.sel { background: var(--action); color: #fff; }
+  #voice-dialog .pill { font-size: 12px; border-radius: 999px; padding: 2px 9px; white-space: nowrap; font-weight: 500; background: #eef1f4; color: var(--muted); }
+  #voice-dialog .pill.ok { background: #def3e6; color: var(--ok); } #voice-dialog .pill.wait { background: var(--gate-bg); color: var(--gate); }
+  #voice-dialog .pill.busy { background: var(--you-bg); color: var(--action); }
+  #voice-dialog .alert { padding: 8px 12px; border-radius: 6px; font-size: 14px; border: 1px solid var(--line); margin: 6px 0 10px; }
+  #voice-dialog .alert.bad { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
+  #voice-dialog .alert.wait { background: var(--gate-bg); border-color: var(--gate); color: var(--gate); }
+  #voice-dialog .live { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+  .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
+  .meter div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+  #voice-dialog .heard { min-height: 1.6em; margin: 8px 0; font-size: 16px; }
+  #voice-dialog .heard .partial { color: var(--muted); font-style: italic; }
+  #voice-dialog .heard .empty-note { color: var(--muted); font-size: 13px; }
+  #voice-dialog .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0; }
+  #voice-dialog .row input:not([type=checkbox]) { flex: 1 1 200px; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  #voice-dialog .row select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+  #voice-ptt { padding: 10px 18px; font-weight: 500; user-select: none; touch-action: none; }
+  #voice-ptt.held { background: var(--gate); color: #fff; border-color: var(--gate); }
+  #voice-ptt:disabled { opacity: .5; cursor: default; }
+  #voice-dialog .sect { font-size: 15px; margin: 16px 0 6px; display: flex; gap: 10px; align-items: baseline; }
+  #voice-dialog .note { color: var(--muted); font-size: 12.5px; }
+  #voice-dialog .stage { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
+  #voice-dialog .stage h4 { margin: 0 0 6px; font-size: 14px; }
+  #voice-dialog .stage h4 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  #voice-dialog .badge { font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--gate-bg); color: var(--gate); margin-left: 8px; }
+  #voice-dialog .knob { display: grid; grid-template-columns: 170px 1fr; gap: 2px 10px; align-items: center; margin: 5px 0; font-size: 13.5px; }
+  #voice-dialog .knob label { color: var(--muted); }
+  #voice-dialog .knob input, #voice-dialog .knob select, #voice-dialog select.use { font: inherit; font-size: 13.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
+  #voice-dialog .knob input[type=checkbox] { justify-self: start; }
+  #voice-dialog .knob .help, #voice-dialog .knob details { grid-column: 1 / -1; }
+  #voice-dialog .knob .help { color: var(--muted); font-size: 12px; }
+  #voice-dialog details.explain { font-size: 12.5px; margin: 2px 0 4px; }
+  #voice-dialog details.explain summary { color: var(--action); cursor: pointer; }
+  #voice-dialog details.explain p { margin: 4px 0; }
+  #voice-dialog .foot { display: flex; justify-content: flex-end; margin-top: 12px; }
+  .msg .via { font-size: 13px; }
+  @media (max-width: 560px) { #voice-dialog .knob { grid-template-columns: 1fr; } }
+
   .gate {
     align-self: stretch; background: var(--gate-bg); border: 2px solid var(--gate); border-radius: 10px; padding: 14px 16px;
   }
@@ -247,6 +293,7 @@
     <span id="s-moveit">MoveIt</span>
     <span id="s-joint_states">Joint states</span>
     <button class="robot-widget" id="robot-widget" type="button" title="How the robot is connected, and what to do next"><span class="lamp" id="robot-lamp"></span><span id="robot-text">Robot: checking…</span></button>
+    <button class="robot-widget" id="voice-toggle" type="button" title="Turn voice control on or off"><span class="lamp off" id="voice-lamp"></span><span id="voice-text">Voice off</span></button><button class="gear" id="voice-settings" type="button" title="Voice: what the microphone hears, push-to-talk, and the voice settings">⚙</button>
     <span class="hint" id="hint" hidden></span>
   </div>
   <button id="reset" type="button" title="Make the model forget this conversation, e.g. after it gets confused">New conversation</button>
@@ -399,6 +446,49 @@
     <button type="button" onclick="this.closest('dialog').close()">Close</button>
   </div>
 </dialog>
+<!-- Voice control: the switch, what the microphone hears, push-to-talk, and the voice app's settings.
+     The settings are drawn when the dialog opens, fetched from the voice app through /voice/*. -->
+<dialog id="voice-dialog">
+  <div class="head">
+    <h2>Voice control</h2>
+    <div class="mode" role="group" aria-label="Voice on or off">
+      <button type="button" id="voice-on-btn">On</button>
+      <button type="button" id="voice-off-btn">Off</button>
+    </div>
+    <span class="pill" id="voice-state">…</span>
+  </div>
+  <div class="alert" id="voice-alert" hidden></div>
+  <div class="live">
+    <div class="meter" title="Microphone level"><div id="voice-level"></div></div>
+    <div class="heard" id="voice-heard"><span class="empty-note">Nothing heard yet.</span></div>
+    <div class="row">
+      <button type="button" id="voice-ptt" disabled title="Hold while you speak; let go when you have finished">Hold to talk</button>
+      <span class="note" id="voice-felt"></span>
+      <span class="note" id="voice-action"></span>
+    </div>
+  </div>
+  <h3 class="sect">Voice settings <span class="note" id="voice-saved"></span></h3>
+  <div id="voice-settings-body">
+    <div class="knob"><label for="voice-device">device</label><select id="voice-device"><option value="auto">auto</option><option value="cuda">cuda</option><option value="metal">metal</option><option value="cpu">cpu</option></select><div class="help">auto picks the best this computer has: cuda (NVIDIA), metal (Apple silicon), otherwise cpu</div></div>
+    <div id="voice-stages"></div>
+    <div class="row">
+      <label>Preset <select id="voice-preset"></select></label>
+      <button type="button" id="voice-preset-load">Load</button>
+      <input id="voice-preset-name" placeholder="new preset name" autocomplete="off">
+      <button type="button" id="voice-preset-save">Save as preset</button>
+    </div>
+  </div>
+  <h3 class="sect">Console side</h3>
+  <form id="voice-url-form" class="row">
+    <label for="voice-url">Voice app address</label>
+    <input id="voice-url" placeholder="http://127.0.0.1:8100" autocomplete="off">
+    <button type="submit">Test and save</button>
+    <span class="note" id="voice-url-note"></span>
+  </form>
+  <label class="row"><input type="checkbox" id="voice-confirm"> Let a spoken “yes” or “no” answer the confirm card <span class="note">(off by default: a misheard “yes” would move the arm)</span></label>
+  <p class="note">Voice settings are saved by the voice app in its settings.yaml and apply to the next thing you say. Changing an engine or model loads it first. Saying only “stop” halts the arm without asking the model.</p>
+  <div class="foot"><button type="button" onclick="this.closest('dialog').close()">Close</button></div>
+</dialog>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -416,7 +506,7 @@ function esc(s) { return String(s).replace(/[&<>]/g, c => ({"&": "&amp;", "<": "
 function renderMessage(m) {
   const div = document.createElement("div");
   div.className = "msg " + m.who;
-  div.innerHTML = esc(m.text);
+  div.innerHTML = (m.via === "voice" ? '<span class="via" title="spoken">🎤</span> ' : "") + esc(m.text);
   if (m.who === "robot" && m.events) {
     const lines = m.events.map(e => {
       const args = Object.keys(e.args).length ? " " + JSON.stringify(e.args) : "";
@@ -540,6 +630,7 @@ async function refresh() {
   showSaved(s.saved || []);
   showTools(s.tools || [], !!s.pendant);
   if (s.robot) showRobot(s.robot, !!s.local);
+  if (s.voice) showVoice(s.voice);
   lastState = s;
   showLimits(s);
 }
@@ -610,6 +701,236 @@ $("robot-widget").onclick = () => { robotMessage = ""; $("robot-dialog").showMod
 $("robot-mode-sim").onclick = () => robotSetMode("sim");
 $("robot-mode-real").onclick = () => robotSetMode("real");
 $("robot-recheck").onclick = () => robotSetMode(robotMode);
+
+// Voice control. The state comes from /state.voice once a second (the header pill, and the live
+// part of the dialog when it is open). The settings are fetched from the voice app, through the
+// console's /voice/* routes, when the dialog opens, and redrawn only then and after an option
+// changes, so a poll never pulls a control out from under a click.
+let voiceOn = false, voiceKey = null, voiceUrlFilled = false, voiceSettings = null, voiceOptions = null;
+let voiceMessage = "";       // the voice app's last refusal (a 400 on a setting, say); shown until the next success
+let voiceHelp = {stages: {}, options: {}, knobs: {}};         // plain-English help from the voice app's help.json
+const VOICE_STAGES = ["trigger", "vad", "endpoint", "stt"];
+const VOICE_STAGE_TITLES = {trigger: "when to start listening", vad: "is someone speaking?",
+                            endpoint: "have you finished?", stt: "speech-to-text"};
+const VOICE_STATES = {idle: ["ok", "idle"], armed: ["wait", "armed, waiting for speech"],
+                      listening: ["wait", "listening"], finalising: ["busy", "finishing"]};
+const VOICE_ACTIONS = {sent: "sent to the model", stopped: "stopped the arm", swallowed: "already stopped",
+                       confirmed: "confirmed the move", cancelled: "cancelled the move",
+                       busy: "not sent: the model was busy", off: "heard, but voice is off", empty: "", ignored: ""};
+function voiceLampText(v) {
+  if (!v.on) return ["off", "Voice off"];
+  if (!v.running) return ["off", "Voice on, app not running"];
+  const [lamp, word] = VOICE_STATES[v.state] || ["ok", v.state || "ready"];
+  return [lamp, "Voice on, " + word];
+}
+function showVoice(v) {
+  voiceOn = !!v.on;
+  const [lamp, text] = voiceLampText(v);
+  $("voice-lamp").className = "lamp " + lamp;
+  $("voice-text").textContent = text;
+  if (!voiceUrlFilled && v.url) { $("voice-url").value = v.url; voiceUrlFilled = true; }
+  if (!$("voice-dialog").open) return;
+  const key = JSON.stringify([v, voiceMessage]);
+  if (key === voiceKey) return;
+  voiceKey = key;
+  $("voice-on-btn").className = v.on ? "sel" : ""; $("voice-off-btn").className = v.on ? "" : "sel";
+  const pill = $("voice-state"); pill.className = "pill " + lamp; pill.textContent = text.replace("Voice on, ", "").replace("Voice ", "");
+  const alert = $("voice-alert");
+  const problem = voiceMessage || (!v.running
+    ? `The voice app is not answering at ${v.url}. Start it (start.sh with "voice_start" set, or its app.py); this page finds it by itself.`
+    : (v.error || ""));
+  alert.hidden = !(problem || v.loading);
+  alert.className = "alert " + (problem ? "bad" : "wait"); alert.textContent = problem || v.loading || "";
+  $("voice-level").style.width = Math.min(100, Math.round((v.level || 0) * 400)) + "%";
+  const heard = $("voice-heard");
+  if (v.partial) heard.innerHTML = `<span class="partial">${esc(v.partial)}…</span>`;
+  else if (v.final) heard.textContent = v.final;
+  else heard.innerHTML = '<span class="empty-note">Nothing heard yet.</span>';
+  $("voice-felt").textContent = v.felt_ms != null && !v.partial ? `felt delay ${Math.round(v.felt_ms)} ms` : "";
+  $("voice-action").textContent = v.final && !v.partial ? (VOICE_ACTIONS[v.action] ?? v.action ?? "") : "";
+  $("voice-ptt").disabled = !(v.on && v.running);
+  $("voice-confirm").checked = !!v.confirm;
+  for (const stage of VOICE_STAGES) {                        // "loading…" on the stage whose model is loading
+    const badge = $("voice-load-" + stage);
+    if (badge) badge.style.display = v.loading && v.loading.includes(stage) ? "" : "none";
+  }
+}
+async function setVoice(on) {
+  voiceKey = null;
+  await post("/voice/on", {on});                             // the note (app not answering) shows in the dialog's alert
+  refresh();
+}
+$("voice-toggle").onclick = () => setVoice(!voiceOn);
+$("voice-on-btn").onclick = () => setVoice(true);
+$("voice-off-btn").onclick = () => setVoice(false);
+$("voice-settings").onclick = () => {
+  voiceKey = null; voiceMessage = "";
+  $("voice-dialog").showModal();
+  if (lastState && lastState.voice) showVoice(lastState.voice);
+  loadVoiceSettings();
+};
+
+// mk("div", {className: "x", on: {click: fn}}, child, ...) builds an element; text only, so no HTML injection.
+function mk(tag, attrs, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "on") for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn);
+    else if (k in node && k !== "list") node[k] = v; else node.setAttribute(k, v);
+  }
+  for (const kid of kids) if (kid !== "" && kid != null) node.append(kid);
+  return node;
+}
+async function vapi(path, method, body) {                    // one request to the voice app, via the console
+  const r = await fetch("/voice/" + path, {method: method || "GET", headers: body ? {"Content-Type": "application/json"} : {},
+                                            body: body ? JSON.stringify(body) : undefined});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.error || r.statusText); e.status = r.status; throw e; }
+  return data;
+}
+// A refusal from the voice app stays on screen (through the one-second redraws) until the next success.
+function voiceProblem(msg) { voiceMessage = msg; voiceKey = null; if (lastState && lastState.voice) showVoice(lastState.voice); }
+function voiceFine() { if (voiceMessage) { voiceMessage = ""; voiceKey = null; } }
+async function loadVoiceSettings() {
+  try {
+    const [o, s, help, presets] = await Promise.all([vapi("options"), vapi("settings"), vapi("help").catch(() => ({})),
+                                                     vapi("presets").catch(() => [])]);
+    voiceFine();
+    voiceOptions = o.options; voiceSettings = s;
+    voiceHelp = {stages: help.stages || {}, options: help.options || {}, knobs: help.knobs || {}};
+    renderVoiceStages();
+    const sel = $("voice-preset"); sel.innerHTML = "";
+    for (const p of presets) sel.append(mk("option", {value: p}, p));
+    $("voice-settings-body").hidden = false;
+  } catch (e) {
+    $("voice-settings-body").hidden = true;
+    voiceProblem("Cannot read the voice settings: " + e.message);
+  }
+}
+// Changes are gathered for 400 ms (so a slider or typing sends once), then posted as one patch.
+let voicePatch = {}, voiceTimer = null;
+function voiceChange(path, value) {                          // path like ["stt", "parakeet", "model"]
+  let node = voicePatch;
+  path.slice(0, -1).forEach(k => { node = node[k] ||= {}; });
+  node[path[path.length - 1]] = value;
+  clearTimeout(voiceTimer);
+  voiceTimer = setTimeout(voiceFlush, 400);
+}
+async function voiceFlush() {
+  const body = voicePatch; voicePatch = {};
+  try {
+    voiceSettings = await vapi("settings", "POST", body);
+    voiceFine();
+    $("voice-saved").textContent = "saved, applies to the next thing you say";
+    setTimeout(() => { $("voice-saved").textContent = ""; }, 3000);
+  } catch (e) { voiceProblem("Voice settings: " + e.message); loadVoiceSettings(); }
+}
+function knobInput(path, spec, value) {
+  const send = v => voiceChange(path, v);
+  const cur = value === undefined ? spec.default : value;
+  switch (spec.type) {
+    case "bool": return mk("input", {type: "checkbox", checked: !!cur, on: {change: e => send(e.target.checked)}});
+    case "choice": return mk("select", {on: {change: e => send(e.target.value)}},
+      ...(spec.choices || []).map(c => mk("option", {value: c, selected: c === cur}, String(c))));
+    case "int": case "float": {
+      const isInt = spec.type === "int";
+      return mk("input", {type: "number", value: cur ?? "", min: spec.min ?? "", max: spec.max ?? "", step: spec.step ?? (isInt ? 1 : "any"),
+        on: {change: e => { const n = isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value); if (!isNaN(n)) send(n); }}});
+    }
+    case "list": return mk("input", {type: "text", value: (cur || []).join(", "),
+      on: {change: e => send(e.target.value.split(",").map(s => s.trim()).filter(Boolean))}});
+    default: return mk("input", {type: "text", value: cur ?? "", on: {change: e => send(e.target.value)}});
+  }
+}
+function explain(entry, label) {                             // a folded "What is this?" from one help.json entry
+  if (!entry || !entry.what) return "";
+  const body = mk("div", {}, mk("p", {}, entry.what));
+  if (entry.higher) body.append(mk("p", {}, mk("b", {}, "Turn it up: "), entry.higher));
+  if (entry.lower) body.append(mk("p", {}, mk("b", {}, "Turn it down: "), entry.lower));
+  if (entry.start) body.append(mk("p", {}, mk("b", {}, "Start with: "), entry.start));
+  return mk("details", {className: "explain"}, mk("summary", {}, label || "What is this?"), body);
+}
+function knobRow(path, name, spec, value) {
+  return mk("div", {className: "knob"}, mk("label", {}, name), knobInput(path, spec, value),
+    spec.help ? mk("div", {className: "help"}, spec.help) : "", explain(voiceHelp.knobs[path.join(".")]));
+}
+const STT_COMMON = {                                         // knobs every speech-to-text engine shares; /options does not list them
+  mode: {type: "choice", choices: ["batch", "streaming"], help: "batch = turn the words into text after you finish; streaming = live text while you speak"},
+  partial_every_ms: {type: "int", min: 100, max: 5000, step: 100, help: "how often live text is produced"},
+  language: {type: "str"},
+  prompt: {type: "str", help: "words the engine should expect (the robot's name, units, directions)"},
+};
+function renderVoiceStages() {
+  const root = $("voice-stages");
+  root.replaceChildren();
+  $("voice-device").value = voiceSettings.device || "auto";
+  for (const stage of VOICE_STAGES) {
+    const opts = voiceOptions[stage] || {}, cfg = voiceSettings[stage] || {};
+    const sel = mk("select", {className: "use", on: {change: e => {
+      cfg.use = e.target.value; voiceChange([stage, "use"], cfg.use); renderVoiceStages(); }}});
+    for (const [name, o] of Object.entries(opts)) {
+      const op = mk("option", {value: name, selected: name === cfg.use}, name + (o.supported ? "" : " (unavailable here)"));
+      if (!o.supported) { op.disabled = true; op.title = o.reason || "not supported on this computer"; }
+      sel.append(op);
+    }
+    const box = mk("div", {className: "stage"},
+      mk("h4", {}, stage, mk("small", {}, VOICE_STAGE_TITLES[stage] || ""),
+        mk("span", {id: "voice-load-" + stage, className: "badge", style: "display:none"}, "loading…")),
+      explain(voiceHelp.stages[stage], "What is this?"), sel,
+      explain(voiceHelp.options[`${stage}.${cfg.use}`], "About this option"));
+    if (stage === "stt")
+      for (const [k, spec] of Object.entries(STT_COMMON)) box.append(knobRow([stage, k], k, spec, cfg[k]));
+    // "both" (wake word or push-to-talk) uses the wake word's knobs, kept under trigger.openwakeword.
+    const owner = (stage === "trigger" && cfg.use === "both") ? "openwakeword" : cfg.use;
+    const o = opts[owner];
+    if (o) for (const [k, spec] of Object.entries(o.knobs || {})) box.append(knobRow([stage, owner, k], k, spec, (cfg[owner] || {})[k]));
+    root.append(box);
+  }
+}
+$("voice-device").onchange = e => voiceChange(["device"], e.target.value);
+$("voice-preset-load").onclick = async () => {
+  const name = $("voice-preset").value;
+  if (!name) return;
+  try { voiceSettings = await vapi(`presets/${name}/load`, "POST", {}); renderVoiceStages(); $("voice-saved").textContent = `preset ${name} loaded`; }
+  catch (e) { voiceProblem("Preset: " + e.message); }
+};
+$("voice-preset-save").onclick = async () => {
+  // Presets used for reported results must not change by accident: replacing one takes a second press.
+  const btn = $("voice-preset-save"), name = $("voice-preset-name").value.trim();
+  if (!name) return;
+  try {
+    await vapi(`presets/${name}` + (btn.dataset.confirm === name ? "?overwrite=1" : ""), "POST", {});
+  } catch (e) {
+    if (e.status === 409 && btn.dataset.confirm !== name) { btn.dataset.confirm = name; btn.textContent = "Press again to replace it"; voiceProblem(e.message); return; }
+    voiceProblem("Preset: " + e.message); return;
+  }
+  delete btn.dataset.confirm; btn.textContent = "Save as preset";
+  $("voice-saved").textContent = `preset ${name} saved`;
+  loadVoiceSettings();
+};
+// Hold to talk: down and up go to the voice app. Let go anywhere (leave, blur, close) so the
+// microphone is never left open.
+let pttHeld = false;
+function ptt(down) {
+  if (pttHeld === down || (down && $("voice-ptt").disabled)) return;
+  pttHeld = down;
+  $("voice-ptt").classList.toggle("held", down);
+  fetch(`/voice/ptt/${down ? "down" : "up"}`, {method: "POST"}).catch(() => {});
+}
+const pttBtn = $("voice-ptt");
+pttBtn.addEventListener("pointerdown", e => { pttBtn.setPointerCapture(e.pointerId); ptt(true); });
+for (const ev of ["pointerup", "pointerleave", "pointercancel"]) pttBtn.addEventListener(ev, () => ptt(false));
+window.addEventListener("blur", () => ptt(false));
+$("voice-dialog").addEventListener("close", () => ptt(false));
+$("voice-url-form").onsubmit = async e => {
+  e.preventDefault();
+  const note = $("voice-url-note"); note.textContent = "testing…";
+  const r = await fetch("/voice/url", {method: "POST", headers: {"Content-Type": "application/json"},
+                                       body: JSON.stringify({url: $("voice-url").value.trim()})});
+  const data = await r.json().catch(() => ({}));
+  note.textContent = r.ok ? `saved: ${data.url}` : (data.error || "Something went wrong");
+  if (r.ok) { voiceKey = null; setTimeout(loadVoiceSettings, 1500); }
+};
+$("voice-confirm").onchange = e => post("/voice/confirm", {on: e.target.checked}).then(() => { voiceKey = null; refresh(); });
 
 let toolsKey = null, toolHint = "", toolHintUntil = 0;
 function showTools(tools, pendant) {
@@ -708,11 +1029,11 @@ $("finish").onclick = async () => {
   const rows = r.records.map(x => {
     const calls = x.events.map(e => `${e.tool} ${Object.keys(e.args).length ? JSON.stringify(e.args) : ""} (${e.outcome})`).join("; ") || "none";
     const motion = x.events.filter(e => e.to_motion_s !== undefined).map(e => e.to_motion_s + " s").join(", ");
-    return `<tr><td>${x.time}</td><td>${esc(x.command)}</td><td class="mono">${esc(calls)}</td><td>${motion}</td><td>${x.total_s} s</td></tr>`;
+    return `<tr><td>${x.time}</td><td>${esc(x.command)}</td><td>${esc(x.via || "typed")}</td><td class="mono">${esc(calls)}</td><td>${motion}</td><td>${x.total_s} s</td></tr>`;
   }).join("");
   $("summary").innerHTML = `<h2 style="margin:0 0 4px;font-size:17px">Session summary</h2>
     <p>${r.records.length} command${r.records.length === 1 ? "" : "s"}. Saved to <span class="mono">${esc(r.path)}</span></p>
-    <table><tr><th>Time</th><th>Command</th><th>Tool calls</th><th>To motion</th><th>Total</th></tr>${rows}</table>
+    <table><tr><th>Time</th><th>Command</th><th>Via</th><th>Tool calls</th><th>To motion</th><th>Total</th></tr>${rows}</table>
     <button onclick="this.closest('dialog').close()">Close</button>`;
   $("summary").showModal();
 };

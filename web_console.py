@@ -27,12 +27,19 @@ One Flask app, one page (static/index.html), and these JSON endpoints:
   POST /robot/mode    {"mode": "sim"|"real"}  which robot the connection panel checks; saved, returns the ladder
   POST /robot/action  {"name": ...}  one step of the connection ladder (bring the profile up, start the
                       driver, power on; 404 unknown, 403 real-robot steps from another computer, 409 failed)
+  POST /voice/on       {"on": true|false}  the voice switch: spoken words become commands (saved, told to the voice app)
+  POST /voice/confirm  {"on": true|false}  let a spoken "yes" / "no" answer the confirm card (saved)
+  POST /voice/url      {"url": ...}  test the voice app's address, save it, reconnect to it
+  GET|POST /voice/<path>  passed on to the voice app (voice.py): options, settings, status, history, presets,
+                       presets/<name>, presets/<name>/load, ptt/down, ptt/up, help; 404 anything else, 502 not answering
 """
 import datetime
 import json
 import pathlib
+import re
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -43,6 +50,7 @@ import desktop_tools
 import generic_tools
 import robot_link
 import robot_tools
+import voice
 
 CONFIRM_TIMEOUT_S = 60
 SESSIONS_DIR = pathlib.Path(__file__).parent / "sessions"
@@ -70,6 +78,8 @@ class Console:
         self._answered = threading.Event()
         self.started = datetime.datetime.now()
         self.saved = self._load_saved()       # moves kept for re-running, survive restarts
+        self.voice_stopped = False            # a spoken "stop" has already stopped the arm for this utterance
+        self._via = None                      # where the running command came from ("voice"), for its record
         robot_tools.set_confirm_handler(self.ask_operator)
 
     # -- the operator gate ---------------------------------------------------
@@ -89,21 +99,26 @@ class Console:
         return False
 
     # -- commands ------------------------------------------------------------
-    def submit(self, text):
-        """Start a command for the model. Returns False if one is already running."""
-        return self._start(text, self._ask_model, text)
+    def submit(self, text, via=None):
+        """Start a command for the model. Returns False if one is already running.
+        `via` says where the words came from ("voice"); typed text has none."""
+        return self._start(text, self._ask_model, text, via)
 
     def rerun(self, label, tool, args):
         """Run a move again straight through its tool: no model, but every safety check."""
         return self._start(f"Run again: {label}", lambda: self._call_tool(tool, args), None)
 
-    def _start(self, shown_text, work, command):
+    def _start(self, shown_text, work, command, via=None):
         with self._lock:
             if self.busy:
                 return False
             self.busy, self.busy_since = True, time.time()
-        self.messages.append({"who": "you", "text": shown_text})
-        thread = threading.Thread(target=self._run, args=(shown_text, work, command), daemon=True)
+        message = {"who": "you", "text": shown_text}
+        if via:
+            message["via"] = via
+        self._via = via                       # so a command stopped half-way is still recorded as spoken
+        self.messages.append(message)
+        thread = threading.Thread(target=self._run, args=(shown_text, work, command, via), daemon=True)
         self._current = thread
         thread.start()
         return True
@@ -116,7 +131,7 @@ class Console:
     def _call_tool(self, tool, args):
         return getattr(robot_tools, tool).invoke(args)
 
-    def _run(self, shown_text, work, command):
+    def _run(self, shown_text, work, command, via=None):
         t0 = time.time()
         robot_tools.mark_command_time()
         robot_tools.events.clear()
@@ -134,7 +149,7 @@ class Console:
         self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": total,
                               "command": command})
         self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
-                             "think": config.THINK, "command": shown_text, "events": events,
+                             "think": config.THINK, "command": shown_text, "via": via or "typed", "events": events,
                              "total_s": total, "reply": reply})
         self._current = None
         self.busy = False
@@ -174,7 +189,7 @@ class Console:
             pass
         waited = round(time.time() - self.busy_since, 1)
         self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
-                             "think": config.THINK, "command": self.messages[-1]["text"],
+                             "think": config.THINK, "command": self.messages[-1]["text"], "via": self._via or "typed",
                              "events": list(robot_tools.events), "total_s": waited, "reply": "(stopped by the operator)"})
         self._current = None
         self._agent = None                    # the old one is still busy; start the next command afresh
@@ -284,27 +299,73 @@ class Console:
                               "events": [], "total_s": 0})
         return True
 
-    def stop(self):
-        """The red button: cancel a pending card and the motion, bypassing the model."""
+    def stop(self, note=None):
+        """The red button: cancel a pending card and the motion, bypassing the model.
+        `note` is put in front of the message when something other than the button asked."""
         if self.pending:
             self.answer(self.pending["id"], False)
         message = robot_tools.stop.invoke({})
-        self.messages.append({"who": "robot", "text": message, "events": [], "total_s": 0})
+        self.messages.append({"who": "robot", "text": f"{note} {message}" if note else message, "events": [], "total_s": 0})
         return message
+
+    # -- voice -----------------------------------------------------------------
+    def heard(self, text, partial=False):
+        """Spoken text from the voice app (voice.py). Works out what it means and returns one
+        word saying what was done, which the voice pop-up shows: off, empty, ignored, stopped,
+        swallowed, confirmed, cancelled, sent or busy. Only "stop" bypasses the model; every
+        other command goes the way typed text goes, through submit() and the tools' checks.
+        `partial` is live text while the person is still speaking: watched for "stop" only."""
+        text = (text or "").strip()
+        if not config.VOICE_ON:
+            return "off"
+        if not text:
+            return "empty"
+        if voice.is_stop(text):
+            if self.voice_stopped:
+                return "swallowed"             # the partial already stopped the arm for this utterance
+            self.voice_stopped = True
+            try:
+                self.stop(note="Stopped by voice.")
+            except Exception as exc:           # no robot, or the stop topic is missing
+                self.messages.append({"who": "robot", "text": f"Stopped by voice, but the stop failed: {exc}",
+                                      "events": [], "total_s": 0})
+            return "stopped"
+        if partial:
+            return "ignored"
+        pending = self.pending
+        if pending and config.VOICE_CONFIRM:
+            if voice.says_yes(text) and self.answer(pending["id"], True):
+                return "confirmed"
+            if voice.says_no(text) and self.answer(pending["id"], False):
+                return "cancelled"
+        if self.submit(text, via="voice"):
+            return "sent"
+        if self.pending:
+            note = (f"Heard “{text}”, but a confirm card is waiting. Answer it on screen, or turn voice "
+                    "confirm on in the voice pop-up.")
+        else:
+            note = f"Heard “{text}” but the model is still busy. Say it again when it has finished."
+        self.messages.append({"who": "robot", "text": note, "events": [], "total_s": 0})
+        return "busy"
+
+    def voice_idle(self):
+        """The voice app is back to idle: the next utterance may stop the arm again."""
+        self.voice_stopped = False
 
     # -- session file --------------------------------------------------------
     def finish(self):
         SESSIONS_DIR.mkdir(exist_ok=True)
         path = SESSIONS_DIR / self.started.strftime("%Y-%m-%d-%H%M.md")
         lines = [f"# Session {self.started:%Y-%m-%d %H:%M}", "",
-                 "| Time | Model | Thinking | Command | Tool calls | First tool after | To motion | Total | Reply |",
-                 "|---|---|---|---|---|---|---|---|---|"]
+                 "| Time | Model | Thinking | Command | Via | Tool calls | First tool after | To motion | Total | Reply |",
+                 "|---|---|---|---|---|---|---|---|---|---|"]
         for r in self.records:
             calls = "; ".join(f"{e['tool']} {e['args']} ({e['outcome']})" for e in r["events"]) or "none"
             motion = ", ".join(f"{e['to_motion_s']} s" for e in r["events"] if "to_motion_s" in e) or ""
             reply = r["reply"].replace("\n", " ").replace("|", "/")
             first = f"{r['events'][0]['after_s']} s" if r["events"] and "after_s" in r["events"][0] else ""
-            lines.append(f"| {r['time']} | {r['model']} | {'on' if r.get('think') else 'off'} | {r['command']} | {calls} | {first} | {motion} | {r['total_s']} s | {reply} |")
+            lines.append(f"| {r['time']} | {r['model']} | {'on' if r.get('think') else 'off'} | {r['command']} | "
+                         f"{r.get('via', 'typed')} | {calls} | {first} | {motion} | {r['total_s']} s | {reply} |")
         path.write_text("\n".join(lines) + "\n")
         return {"path": str(path), "records": self.records}
 
@@ -384,6 +445,12 @@ def package_file(package, rel):
 
 console = None   # set in main() or by the tests
 
+# The link to the voice app (voice.py). Its callbacks run on the link's own thread and look
+# `console` up when called, because the tests replace it.
+voice_link = voice.VoiceLink(on_final=lambda text: console.heard(text),
+                             on_partial=lambda text: console.heard(text, partial=True),
+                             on_idle=lambda: console.voice_idle())
+
 
 @app.get("/")
 def index():
@@ -399,7 +466,12 @@ def state():
                    limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED,
                    shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
                    frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME}, tools=desktop_tools.rows(),
-                   robot=robot_link.latest, local=_local())
+                   robot=robot_link.latest, local=_local(), voice=voice_state())
+
+
+def voice_state():
+    """What the page shows about voice: the voice app's latest news plus the console's own settings."""
+    return {**voice_link.latest, "on": config.VOICE_ON, "confirm": config.VOICE_CONFIRM, "url": config.VOICE_URL}
 
 
 def _local():
@@ -645,12 +717,69 @@ def finish():
     return jsonify(console.finish())
 
 
+# -- voice: the switch, the address, and a window onto the voice app's own settings ------
+
+@app.post("/voice/on")
+def voice_on():
+    on = bool((request.json or {}).get("on", False))
+    config.save_settings({"voice_on": on})
+    note = voice_link.set_on(on)              # a sentence when the voice app is not answering, else None
+    console.messages.append({"who": "robot", "text": "Voice control is on." if on else "Voice control is off.",
+                             "events": [], "total_s": 0})
+    return jsonify(ok=True, on=on, note=note)
+
+
+@app.post("/voice/confirm")
+def voice_confirm():
+    config.save_settings({"voice_confirm": bool((request.json or {}).get("on", False))})
+    return jsonify(ok=True, confirm=config.VOICE_CONFIRM)
+
+
+@app.post("/voice/url")
+def voice_url():
+    url = (request.json or {}).get("url", "")
+    if not isinstance(url, str) or not url.startswith("http") or not urllib.parse.urlsplit(url).hostname:
+        return jsonify(error="The address must start with http://, e.g. http://127.0.0.1:8100"), 400
+    url = url.rstrip("/")
+    try:
+        status, body = voice_link.request("GET", "/status", base=url)
+    except voice.VoiceUnavailable as exc:
+        return jsonify(error=str(exc)), 502
+    if status != 200 or "state" not in body:   # something answered (Ollama? this console?), but not the voice app
+        return jsonify(error=f"{url} answered, but it is not the voice app."), 400
+    config.save_settings({"voice_url": url})
+    voice_link.reconnect()                    # the listening thread picks the new address up at once
+    return jsonify(ok=True, url=url)
+
+
+# The voice app's pages the pop-up may use. /wake is not among them: the switch is the console's.
+VOICE_PROXIED = re.compile(r"options|settings|status|history|presets|presets/[\w-]+|presets/[\w-]+/load|ptt/(down|up)|help")
+
+
+@app.route("/voice/<path:sub>", methods=["GET", "POST"])
+def voice_proxy(sub):
+    """Pass a request on to the voice app, same method, body and query string, and hand its own
+    answer (status and JSON) straight back, so the page only ever talks to the console."""
+    if not VOICE_PROXIED.fullmatch(sub):
+        return jsonify(error=f"/voice/{sub} is not something the console passes on."), 404
+    path = "/static/help.json" if sub == "help" else "/" + sub
+    if request.query_string:
+        path += "?" + request.query_string.decode()
+    body = request.get_json(silent=True) if request.method == "POST" else None
+    try:
+        status, data = voice_link.request(request.method, path, body)
+    except voice.VoiceUnavailable as exc:
+        return jsonify(error=str(exc)), 502
+    return jsonify(data), status
+
+
 def main():
     global console
     from rosa_agent import abort, build_agent
     console = Console(build_agent, abort)
     print(f"Web console on http://0.0.0.0:8000, model {config.MODEL} at {config.OLLAMA_URL}")
     robot_link.start_background()             # the connection ladder, checked every few seconds
+    voice_link.start_background()             # listens to the voice app, if it is running
     app.run(host="0.0.0.0", port=8000, threaded=True)
 
 
