@@ -39,6 +39,12 @@ def good(monkeypatch):
     return answers
 
 
+def test_the_simulator_does_not_mind_the_speed_slider(good, monkeypatch):
+    monkeypatch.setattr(robot_link, "speed_scaling", lambda: 100.0)
+    assert robot_link.ladder("sim")["rungs"][4]["lamp"] == "ok"
+    assert robot_link.ladder("real")["rungs"][6]["lamp"] == "gate"
+
+
 def test_a_missing_network_profile_gets_the_one_time_command(good, monkeypatch):
     monkeypatch.setattr(robot_link, "addresses", lambda port: [])
     monkeypatch.setattr(robot_link, "profile_exists", lambda name: False)

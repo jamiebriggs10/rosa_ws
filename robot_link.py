@@ -329,6 +329,8 @@ def _rung_speed(mode):
     if percent is None:
         return "gate", "No speed value from the driver yet.", None, False
     percent = round(percent)
+    if mode == "sim":                                  # nothing can be hurt in the simulator
+        return "ok", f"Speed slider at {percent} % (the simulator; any value is fine).", None, False
     if percent <= 20:
         return "ok", f"Speed slider at {percent} %.", None, False
     return "gate", f"Speed slider at {percent} %: set it to 10 to 20 % for a first run.", None, True
