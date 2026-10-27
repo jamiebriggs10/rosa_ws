@@ -51,3 +51,18 @@ def test_report_marks_missing_and_undescribed():
     assert rows["/multiview_scan/capture"]["status"] == "ready"
     assert rows["/joint_states"]["status"] == "undescribed" and rows["/joint_states"]["moves_robot"] is None
     assert rows["/touchdown_test/execute"]["status"] == "missing" and rows["/touchdown_test/execute"]["kind"] == ""
+
+
+def test_rows_carry_node_and_say(tmp_path):
+    f = tmp_path / "interfaces.yaml"
+    f.write_text("system: test\ninterfaces:\n"
+                 "  /multiview_scan/capture:\n    means: Take one 3D view from here. Adds it to the scan.\n    moves_robot: false\n"
+                 "  /clicked_point:\n    means: Pick a point.\n    say: pick a point\n    node: inspection\n    moves_robot: false\n")
+    d = Description.load(f)
+    rows = report(d, [Interface("/multiview_scan/capture", "service", "std_srvs/srv/Trigger"),
+                      Interface("/clicked_point", "topic", "geometry_msgs/msg/PointStamped")])
+    by = {r["name"]: r for r in rows}
+    assert by["/multiview_scan/capture"]["node"] == "multiview_scan" and by["/multiview_scan/capture"]["say"] == "take one 3d view from here"
+    assert by["/clicked_point"]["node"] == "inspection" and by["/clicked_point"]["say"] == "pick a point"
+    undescribed = report(d, [Interface("/joint_states", "topic", "sensor_msgs/msg/JointState")])[0]
+    assert undescribed["node"] == "root" and undescribed["say"] == "/joint_states"

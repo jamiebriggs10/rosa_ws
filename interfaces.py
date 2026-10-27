@@ -20,6 +20,7 @@ Rules the policy applies to every write (service call or publish):
 Reads are always allowed.
 """
 import pathlib
+import re
 
 import yaml
 
@@ -45,7 +46,9 @@ class Description:
             if not isinstance(entry, dict):
                 raise ValueError(f"{path}: entry {name} must be a mapping (means:, moves_robot:).")
             entries[str(name)] = {"means": str(entry.get("means", "")).strip(),
-                                  "moves_robot": bool(entry.get("moves_robot", True))}
+                                  "moves_robot": bool(entry.get("moves_robot", True)),
+                                  "node": str(entry.get("node", "")).strip() or None,     # which program offers it (map)
+                                  "say": str(entry.get("say", "")).strip() or None}       # an example phrase (map, tour)
         return cls(str(data.get("system", "")).strip(), entries)
 
     def get(self, name):
@@ -65,6 +68,25 @@ def policy(description, name, allow_unlisted):
     return "ok", ""
 
 
+def node_of(name, entry=None):
+    """Which program an interface belongs to, for the map: the entry's `node`, else the first
+    part of its name (/multiview_scan/capture -> multiview_scan), else "root"."""
+    if entry and entry.get("node"):
+        return entry["node"]
+    parts = [p for p in str(name).split("/") if p]
+    return parts[0] if len(parts) > 1 else "root"
+
+
+def say_of(name, entry=None):
+    """An example phrase for an interface: the entry's `say`, else the first clause of its
+    meaning in lower case, else its name."""
+    if entry and entry.get("say"):
+        return entry["say"]
+    means = (entry or {}).get("means") or ""
+    first = re.split(r"[.,:;(]", means, 1)[0].strip().rstrip(".").lower()
+    return first or str(name)
+
+
 def report(description, interfaces):
     """One row per interface for the console: everything on the graph, plus anything
     the file describes that is missing from the graph."""
@@ -75,9 +97,11 @@ def report(description, interfaces):
         rows.append({"name": i.name, "kind": i.kind, "type": i.type,
                      "means": entry["means"] if entry else "",
                      "moves_robot": entry["moves_robot"] if entry else None,
-                     "status": "ready" if entry else "undescribed"})
+                     "status": "ready" if entry else "undescribed",
+                     "node": node_of(i.name, entry), "say": say_of(i.name, entry)})
     for name, entry in description.entries.items():
         if name not in seen:
             rows.append({"name": name, "kind": "", "type": "", "means": entry["means"],
-                         "moves_robot": entry["moves_robot"], "status": "missing"})
+                         "moves_robot": entry["moves_robot"], "status": "missing",
+                         "node": node_of(name, entry), "say": say_of(name, entry)})
     return rows

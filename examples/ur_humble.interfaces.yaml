@@ -11,6 +11,7 @@ system: UR_humble inspection cell. A UR12e with a Zivid 3D camera and an eddy-cu
 interfaces:
   /multiview_scan/capture:
     means: Take one 3D view with the camera from where the arm is now and add it to the scan. Fails if the camera is not running.
+    say: take a scan view
     moves_robot: false
   /multiview_scan/reset:
     means: Throw away the scan so far and start again.
@@ -21,11 +22,14 @@ interfaces:
     means: Camera poses the scanner suggests for the next views.
   /clicked_point:
     means: Pick a point on the scanned surface. The system fits a flat patch around it and lays a raster over the patch. This only selects; nothing moves.
+    say: pick the point at x thirty, y minus sixty, z five
+    node: inspection
     moves_robot: false
   /inspection/selected_surface:
     means: The flat patch that was picked, as a point cloud.
   /inspection/raster_path:
     means: The raster path over the picked patch, in the world frame.
+    say: show me the raster and its points
   /inspection/raster_plan_valid:
     means: Whether MoveIt could plan the approach and raster. True means the preview is ready.
   /touchdown_test/execute:
@@ -33,4 +37,5 @@ interfaces:
     moves_robot: true
   /touchdown_test/execute_raster:
     means: Touch down at the start of the raster and scan the whole raster with the probe pressed on the surface.
+    say: run the raster
     moves_robot: true

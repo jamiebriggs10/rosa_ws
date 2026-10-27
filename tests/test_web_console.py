@@ -16,8 +16,10 @@ class FakeAgent:
 
     def __init__(self):
         self.action = None
+        self.calls = 0
 
     def invoke(self, text):
+        self.calls += 1
         if self.action:
             return self.action()
         return f"echo: {text}"
@@ -37,6 +39,14 @@ def client(monkeypatch, tmp_path):
     c = web_console.app.test_client()
     c.agent = agent
     yield c
+    # Leave nothing behind: a card still waiting would time out later and speak through the
+    # next test's recorder; a tour still running would light the next test's map.
+    old = web_console.console
+    if old.pending:
+        old.answer(old.pending["id"], False)
+    old._tour_id += 1
+    if old._later:
+        old._later.cancel()
 
 
 def wait_until(predicate, timeout=5):
@@ -270,7 +280,10 @@ def test_capabilities_have_the_shape_the_panel_needs(client, monkeypatch):
              "means": "Take one view", "moves_robot": False, "status": "ready"}]
     monkeypatch.setattr(web_console.generic_tools, "capability_rows", lambda: rows)
     body = client.get("/capabilities").get_json()
-    assert body["interfaces"] == rows and body["moveit"] is False and "file" in body
+    first = body["interfaces"][0]
+    assert {k: first[k] for k in rows[0]} == rows[0] and first["node"] == "multiview_scan" and first["say"] == "take one view"
+    assert body["moveit"] is False and "file" in body
+    assert [r["node"] for r in body["interfaces"][1:]] == ["moveit"] * len(web_console.robot_tools.MOVEIT_SKILLS)
 
 
 def test_capabilities_report_a_graph_problem(client, monkeypatch):
@@ -832,3 +845,59 @@ def test_felt_delay_lands_in_the_record(client, voice_on, recorder):
     assert c.records[-1]["felt_ms"] == 412
     text = open(client.post("/finish").get_json()["path"]).read()
     assert "| 0.41 s |" in text
+
+
+# ---- the map's data and the self-questions: answered by the console, never by the model ----
+
+CAP_ROWS = [{"name": "/multiview_scan/capture", "kind": "service", "type": "std_srvs/srv/Trigger",
+             "means": "Take one 3D view from here.", "moves_robot": False, "status": "ready", "node": "multiview_scan", "say": "take one 3d view from here"},
+            {"name": "/touchdown_test/execute_raster", "kind": "service", "type": "std_srvs/srv/Trigger",
+             "means": "Scan the raster with the probe down.", "moves_robot": True, "status": "ready", "node": "touchdown_test", "say": "run the raster"},
+            {"name": "/joint_states", "kind": "topic", "type": "sensor_msgs/msg/JointState", "means": "", "moves_robot": None, "status": "undescribed"}]
+
+
+@pytest.fixture
+def caps(monkeypatch):
+    monkeypatch.setattr(web_console.generic_tools, "capability_rows", lambda: [dict(r) for r in CAP_ROWS])
+    return CAP_ROWS
+
+
+def test_capabilities_include_moveit_rows_with_phrases(client, caps):
+    rows = client.get("/capabilities").get_json()["interfaces"]
+    home = next(r for r in rows if r["name"] == "go_home")
+    assert home["node"] == "moveit" and home["say"] == "go home" and home["moves_robot"] is True and home["kind"] == "tool"
+    assert next(r for r in rows if r["name"] == "/joint_states")["node"] == "root"      # old-style rows get a node too
+
+
+def test_what_can_i_do_is_answered_without_the_model(client, caps, recorder):
+    assert client.post("/command", json={"text": "what can I do with multiview_scan"}).status_code == 200
+    wait_until(lambda: len(recorder.say_calls) >= 2, timeout=5)
+    assert recorder.say_calls[0] == "Multiview scan offers 1 thing." and client.agent.calls == 0
+    assert recorder.say_calls[1] == 'Take one 3D view from here: say "take one 3d view from here".'
+    wait_until(lambda: client.get("/state").get_json()["lit"] == ["/multiview_scan/capture"], timeout=5)
+    wait_until(lambda: client.get("/state").get_json()["lit"] == [], timeout=5)
+    assert web_console.console.records[-1]["command"] == "what can I do with multiview_scan"
+    assert client.get("/state").get_json()["follow_until_s"] > 0
+
+
+def test_which_move_the_robot_lists_the_movers(client, caps, recorder):
+    web_console.console.heard = web_console.console.heard   # (voice path shares submit)
+    client.post("/command", json={"text": "Which of these move the robot?"})
+    wait_until(lambda: recorder.say_calls, timeout=5)
+    assert recorder.say_calls[0].startswith("These move the robot") and "run the raster" in recorder.say_calls[0]
+    assert "go home" in recorder.say_calls[0] and client.agent.calls == 0
+
+
+def test_show_ros_is_saved_and_in_state(client, caps, recorder, monkeypatch):
+    monkeypatch.setattr(web_console.config, "MAP_ROS", False)
+    client.post("/command", json={"text": "show ros"})
+    wait_until(lambda: client.get("/state").get_json()["map_ros"] is True, timeout=5)
+    client.post("/command", json={"text": "hide ROS."})
+    wait_until(lambda: client.get("/state").get_json()["map_ros"] is False, timeout=5)
+    assert client.agent.calls == 0
+
+
+def test_a_plain_question_still_goes_to_the_model(client, caps, recorder):
+    client.post("/command", json={"text": "what can the camera see"})
+    wait_until(lambda: not web_console.console.busy)
+    assert client.agent.calls == 1

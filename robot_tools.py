@@ -704,3 +704,24 @@ def stop() -> str:
 
 
 ALL_TOOLS = [where_is_the_tool, move_by, move_to, move_path, move_formula, move_joint, go_home, stop]
+
+# What MoveIt (the move_group node) offers through these tools, for the console's map and the spoken
+# tour. The same shape as a described interface: a meaning, an example phrase, and whether it moves.
+MOVEIT_SKILLS = [
+    {"name": "where_is_the_tool", "means": "Where the tool is, in centimetres from the base.", "say": "where is the tool",
+     "moves_robot": False, "type": "tf2 lookup"},
+    {"name": "move_by", "means": "Move the tool in a straight line by an amount.", "say": "up five centimetres",
+     "moves_robot": True, "type": "GetCartesianPath + ExecuteTrajectory"},
+    {"name": "move_to", "means": "Move the tool in a straight line to a position.", "say": "go to x forty, y minus ten, z thirty",
+     "moves_robot": True, "type": "GetCartesianPath + ExecuteTrajectory"},
+    {"name": "move_path", "means": "Move the tool through a list of points.", "say": "move through the points zero zero five and five zero five",
+     "moves_robot": True, "type": "GetCartesianPath + ExecuteTrajectory"},
+    {"name": "move_formula", "means": "Move the tool along a shape given as a formula.", "say": "draw a ten centimetre circle",
+     "moves_robot": True, "type": "GetCartesianPath + ExecuteTrajectory"},
+    {"name": "move_joint", "means": "Turn one joint by some degrees.", "say": "joint two by ten degrees",
+     "moves_robot": True, "type": "MoveGroup action"},
+    {"name": "go_home", "means": "Move the whole arm to its home pose.", "say": "go home",
+     "moves_robot": True, "type": "MoveGroup action"},
+    {"name": "stop", "means": "Halt the motion in progress.", "say": "stop",
+     "moves_robot": False, "type": "ExecuteTrajectory cancel"},
+]

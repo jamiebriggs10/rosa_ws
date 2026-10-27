@@ -97,6 +97,8 @@ class Console:
         self._last_label = None               # what the last card proposed, for the held correction's context
         self._changed = False                 # this command is a held correction: the proposal says "instead"
         self._felt_ms = None                  # the voice app's felt delay for the spoken command running now
+        self._tour_id = 0                     # a new question or command interrupts a running tour
+        self._last_event = None               # the last tool event, for "where did that go"
         self._later = None                    # the timer that returns a finished phase to idle
         robot_tools.set_confirm_handler(self.ask_operator)
 
@@ -207,7 +209,114 @@ class Console:
         """Start a command for the model. Returns False if one is already running.
         `via` says where the words came from ("voice"); typed text has none. `shown` is what
         the chat and the session table show when it differs from what the model is sent."""
+        if not self.busy and self.self_question(text, via):
+            return True
         return self._start(shown if shown is not None else text, self._ask_model, text, via)
+
+    # -- questions about the console itself: the map's tour, answered without the model --------
+    def self_question(self, text, via=None):
+        """Answer "what can I do with X", "which of these move the robot", "where did that go" and
+        "show/hide ros" here: spoken, with the map lit. True when handled."""
+        for kind, pattern in SELF_QUESTIONS:
+            m = pattern.match((text or "").strip())
+            if m:
+                break
+        else:
+            return False
+        self._tour_id += 1
+        try:
+            rows, _ = capability_rows_with_moveit()
+        except Exception as exc:
+            self._say_one(f"I cannot read what the system offers: {exc}", text, via)
+            return True
+        persona = config.VOICE_PERSONA
+        sentences = []
+        if kind == "tour":
+            group = find_group(rows, m.group("g")) if m.group("g") else None
+            if m.group("g") and group is None:
+                self._say_one(f"I don't know a node called {m.group('g')}. Say \"what can I do\" for the list.", text, via)
+                return True
+            if group is None:
+                nodes = []
+                for r in rows:
+                    if r["status"] != "undescribed" and r["node"] not in nodes:
+                        nodes.append(r["node"])
+                sentences.append((lines.line("tour_all", persona, count=len(nodes), groups=[group_name(n) for n in nodes]), nodes))
+            else:
+                offers = [r for r in rows if r["node"] == group and r["status"] != "undescribed"] or \
+                         [r for r in rows if r["node"] == group]
+                sentences.append((lines.line("tour_intro", persona, group=group_name(group), count=len(offers)), [group]))
+                for r in offers:
+                    name = (r.get("means") or r["name"]).split(". ")[0].rstrip(".")
+                    sentences.append((lines.line("tour_item", persona, name=name, say=r["say"], moves=bool(r.get("moves_robot"))), [r["name"]]))
+        elif kind == "movers":
+            movers = [r for r in rows if r.get("moves_robot")]
+            sentences.append((lines.line("movers", persona, names=[r["say"] for r in movers]), [r["name"] for r in movers]))
+        elif kind == "trace":
+            last = self._last_event
+            if not last:
+                sentences.append(("Nothing has run yet.", []))
+            else:
+                row = next((r for r in rows if r["name"] == last.get("tool") or r["name"] == last.get("args", {}).get("service")
+                            or r["name"] == last.get("args", {}).get("topic")), None)
+                if row:
+                    sentences.append((lines.line("trace", persona, group=group_name(row["node"]), ros=row["type"] or row["name"]), [row["node"], row["name"]]))
+                else:
+                    sentences.append((f"The last command used {last.get('tool')}.", []))
+        elif kind == "ros":
+            on = m.group("on").lower() == "show"
+            config.save_settings({"map_ros": on})
+            sentences.append(("ROS names shown." if on else "ROS names hidden.", []))
+        self._record_question(text, via, sentences[0][0] if sentences else "")
+        threading.Thread(target=self._tour, args=(sentences, self._tour_id), daemon=True).start()
+        return True
+
+    def _say_one(self, line, text, via):
+        self._record_question(text, via, line)
+        self.said = line
+        voice_link.say(line)
+        self.messages.append({"who": "robot", "text": line, "events": [], "total_s": 0})
+
+    def _record_question(self, text, via, reply):
+        message = {"who": "you", "text": text}
+        if via:
+            message["via"] = via
+        self.messages.append(message)
+        self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
+                             "think": config.THINK, "command": text, "via": via or "typed", "events": [],
+                             "total_s": 0, "reply": reply, "phases": []})
+
+    def _tour(self, sentences, tour_id):
+        """Speak the sentences one by one, lighting the map nodes each is about. Stops when a
+        command starts or another question is asked."""
+        said = []
+        for line, ids in sentences:
+            if self.busy or tour_id != self._tour_id:
+                break
+            self.lit, self.said = list(ids), line
+            voice_link.say(line)
+            said.append(line)
+            self._wait_said()
+        if tour_id == self._tour_id:
+            self.lit = []
+            self.messages.append({"who": "robot", "text": " ".join(said), "events": [], "total_s": 0})
+            self._open_follow_up()
+
+    def _wait_said(self):
+        """Wait for the voice app to finish the line: it reports speaking on and off; without it,
+        a fixed 1.8 s per sentence."""
+        latest = voice_link.latest
+        t0 = time.time()
+        if not latest.get("running"):
+            time.sleep(1.8)
+            return
+        while time.time() - t0 < 0.5 and not latest.get("speaking"):
+            time.sleep(0.05)
+        if not latest.get("speaking"):
+            time.sleep(max(0.0, 1.8 - (time.time() - t0)))
+            return
+        while latest.get("speaking") and time.time() - t0 < 20:
+            time.sleep(0.05)
 
     def rerun(self, label, tool, args):
         """Run a move again straight through its tool: no model, but every safety check."""
@@ -257,6 +366,8 @@ class Console:
         self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": total,
                               "command": command})
         end = END_PHASE.get(events[-1]["outcome"], "done") if events else "done"
+        if events:
+            self._last_event = events[-1]
         self.set_phase(end)
         self._announce_end(end, events, reply)
         record = {"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
@@ -574,6 +685,60 @@ def _cached_status():
     return _status_cache["value"]
 
 
+def capability_rows_with_moveit():
+    """The capability rows as the map and the tour want them: every row with a node and an example
+    phrase (older rows get them here), plus MoveIt's own tools as rows of node "moveit"."""
+    from interfaces import node_of, say_of
+    rows = []
+    for r in generic_tools.capability_rows():
+        r = dict(r)
+        r.setdefault("node", node_of(r["name"]))
+        r.setdefault("say", say_of(r["name"], {"means": r.get("means", "")}))
+        rows.append(r)
+    names = {r["name"] for r in rows}
+    moveit = config.MOVE_ACTION in names and config.CARTESIAN_SERVICE in names
+    for skill in robot_tools.MOVEIT_SKILLS:
+        rows.append({"name": skill["name"], "kind": "tool", "type": skill["type"], "means": skill["means"],
+                     "moves_robot": skill["moves_robot"], "status": "ready" if moveit else "missing",
+                     "node": "moveit", "say": skill["say"]})
+    return rows, moveit
+
+
+def group_name(node):
+    """A node id as the map shows it: multiview_scan -> Multiview scan, moveit -> MoveIt."""
+    return {"moveit": "MoveIt", "root": "Root", "ur_driver": "UR driver"}.get(node) or node.replace("_", " ").capitalize()
+
+
+def find_group(rows, words):
+    """The node id the operator means by `words`, or None."""
+    want = (words or "").strip().lower().strip("?.!")
+    if not want:
+        return None
+    nodes = []
+    for r in rows:
+        if r["node"] not in nodes:
+            nodes.append(r["node"])
+    for node in nodes:
+        if want in (node, node.replace("_", " "), group_name(node).lower()):
+            return node
+    for node in nodes:
+        if node.startswith(want.replace(" ", "_")) or group_name(node).lower().startswith(want):
+            return node
+    return None
+
+
+# Questions about the console itself, answered here (spoken, with the map lit) and never sent to
+# the model. Whole utterances; the wake word, if any, has already been trimmed by the voice app.
+SELF_QUESTIONS = [
+    ("tour", re.compile(r"^(?:what can i (?:do|say))(?: with (?P<g>.+?))?\s*[?.!]*$", re.I)),
+    ("tour", re.compile(r"^what(?:'s| is) connected to (?P<g>.+?)\s*[?.!]*$", re.I)),
+    ("tour", re.compile(r"^(?:tell me about|what does) (?P<g>.+?)(?: do)?\s*[?.!]*$", re.I)),
+    ("movers", re.compile(r"^(?:which (?:of these |ones? )?moves? the robot|what moves the robot)\s*[?.!]*$", re.I)),
+    ("trace", re.compile(r"^where did (?:that|it) go\s*[?.!]*$", re.I)),
+    ("ros", re.compile(r"^(?P<on>show|hide) ros\s*[?.!]*$", re.I)),
+]
+
+
 def ollama_up():
     try:
         urllib.request.urlopen(config.OLLAMA_URL + "/api/tags", timeout=1)
@@ -746,14 +911,13 @@ def model():
 
 @app.get("/capabilities")
 def capabilities():
-    """What the robot's system offers, for the panel on the page."""
+    """What the robot's system offers, for the panel on the page and the map: every interface
+    with its node and an example phrase, plus MoveIt's tools as rows of node "moveit"."""
     try:
-        rows = generic_tools.capability_rows()
+        rows, moveit = capability_rows_with_moveit()
     except Exception as exc:
         return jsonify(error=f"Cannot read the ROS graph: {exc}"), 502
-    names = {r["name"] for r in rows}
-    return jsonify(system=generic_tools.description().system, interfaces=rows,
-                   moveit=config.MOVE_ACTION in names and config.CARTESIAN_SERVICE in names,
+    return jsonify(system=generic_tools.description().system, interfaces=rows, moveit=moveit,
                    file=str(config.INTERFACES_FILE), allow_unlisted_writes=config.ALLOW_UNLISTED_WRITES)
 
 
