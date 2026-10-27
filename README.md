@@ -21,8 +21,10 @@ Built by Jamie Briggs for a University of Strathclyde dissertation, on top of
 - **A safety layer** that caps every move, refuses what MoveIt cannot plan
   cleanly, refuses writes to anything not described, and puts every motion
   behind a confirm card that shows the plan on a 3D view first.
-- **A web console** with a chat, the 3D view, a stop button, the safety
-  limits, the model picker and the settings.
+- **A web console** in two pages: the workbench (chat, the 3D view, a stop
+  button, the safety limits, the model picker and the settings) and the stage
+  (hands-free: one big panel, sounds and speech, a map of what the system
+  offers, every setting in one pop-up).
 
 ## What you need
 
@@ -176,54 +178,119 @@ moves the arm; Play, the speed slider, protective stops and the e-stop stay on
 the pendant on purpose. The model has a read-only `robot_status` tool with the
 same ladder, so "is the robot ready?" gets a true answer.
 
+## The stage
+
+The console has two pages. The **workbench** (`/`, everything above) is for typing at the
+desk. The **stage** (`/stage`, the *Stage* link in the header) is for working by ear and
+from across the cell: one big panel that says what Rosa is doing, what she heard, what she
+proposes and what she measured; the 3D view with the planned path; and the **map**, a graph
+of what the connected nodes offer. Each page remembers itself as the one to open.
+
+Everything on the stage comes from the same console. What it shows is driven by the
+**loop**: one phase at a time, each with a lamp colour, a sound and (by verbosity) a
+spoken line:
+
+| Phase | Lamp | Sound | Rosa says (verbosity 1 unless noted) |
+|---|---|---|---|
+| listening, heard | amber, pulsing | rising two-tone, then a tick | |
+| thinking | indigo | a quiet pulse | "On it." (verbosity 2) |
+| proposing | orange | a two-note question | the read-back: "Point 10. 14 centimetres, 6 seconds, path clear. Confirm?" |
+| moving | green | a falling pair | |
+| done | green | a short resolve | "At Point 10." (what was measured) |
+| refused | red | a low buzz | the reason, the same words in both personas |
+| cancelled, stopped | red | a low note | "Cancelled." (2) / "Stopped at x, y, z." |
+| follow | amber, dim | | (the follow-up window: no wake word needed) |
+
+The stage's **Settings** pop-up holds every setting of the workbench (model, safety limits,
+the robot-connection ladder, voice, tools, what the system offers, session) plus the stage's
+own: how much Rosa says (`voice_verbosity`: 0 sounds only, 1 read-backs and results, 2
+everything), in whose words (`voice_persona`: A the technician, B the colleague; see
+`lines.py`), the follow-up window (`follow_up_s`, default 8), how long a confirm card waits
+(`confirm_timeout_s`, default 20), the map's "show ROS", and the speech voice. The chat and
+the saved moves stay on the workbench.
+
+**The map** draws `/capabilities`: Rosa in the middle, one node per program (MoveIt, the UR
+driver, and every node the description file names or whose interfaces it describes), one
+small node per thing it offers, with the example phrase to say. Nothing on it is hard-coded:
+describe a new node's services in `interfaces.yaml` (optionally with `say:` and `node:`),
+press *Rescan*, and it appears, sayable. Amber rings mark what moves the robot; the running
+command's path and a spoken tour light up. Tap a node to hear what it offers; tap an offer to
+say its phrase. "Show ROS" switches to ROS names and adds the undescribed interfaces, the
+rest collapsed into one node per group with a count. The questions the map answers are
+answered by the console itself, never by the model: "what can I do (with X)", "what's
+connected to X", "which of these move the robot", "where did that go", "show / hide ros".
+
+For page work without ROS (on a Mac), `python3 tests/mock_console.py --rows 160` serves
+both pages with scripted answers; see the header of that file.
+
 ## Voice control
 
 Speech is handled by a separate program, the **voice app** (the Voice Control
 Prototype: wake word or push-to-talk, then speech-to-text, with every stage
 swappable for the dissertation's comparisons). It runs on the same computer
 as the console, on port 8100, with its own settings file. The console listens
-to it; the voice app never talks to the robot.
+to it and, since the stage, talks back through it: it asks the voice app to
+play the loop's sounds (`/play`) and to speak the lines it composes (`/say`,
+Piper); the voice app mutes its own microphone while it speaks. The voice app
+never talks to the robot. Without it, the console works by typing and the
+lamp still shows the phase; it simply makes no sound.
 
-Next to the robot widget there is a **Voice** pill and a gear. The pill is the
-switch: click it to turn voice control on or off (grey "Voice off"; green
-"Voice on, idle"; amber while armed or listening). The gear opens the voice
-pop-up: the same switch, a microphone level bar, the live text as it is
-heard with the felt delay in milliseconds, a *Hold to talk* button, and then
-every setting of the voice app (device; for each of trigger, VAD, end of turn
-and speech-to-text the option in force and its knobs, each with a "What is
-this?"), presets to load and save, the voice app's address, and the
-voice-confirm checkbox. Settings changes are saved by the voice app in its
-`settings.yaml` and apply to the next thing you say.
+On the workbench, next to the robot widget, there is a **Voice** pill and a gear.
+The pill is the switch; the gear opens the voice pop-up: the same switch, a
+microphone level bar, the live text as it is heard with the felt delay, a *Hold
+to talk* button, and every setting of the voice app (device; for each stage the
+option in force and its knobs, each with a "What is this?"), presets, the voice
+app's address, and the voice-confirm checkbox. On the stage the same controls
+are in the Settings pop-up under *Voice*.
 
-With voice on, what you say arrives in the chat as a command, marked with a
-🎤, and the model treats it exactly like typed text: the same tools, the same
-safety checks, the same confirm card. Two things are different:
+With voice on, what you say arrives as a command, marked with a 🎤, and the
+model treats it exactly like typed text: the same tools, the same safety
+checks, the same confirm card. What is different:
 
 - **"Stop"** (or "halt", "freeze", on its own) halts the arm at once, without
   the model. With a streaming speech-to-text engine this happens on the live
   text, before you have finished the word.
-- **Voice confirm** is off by default: a confirm card is answered on screen.
-  Tick the box in the pop-up and a spoken "yes" (or "confirm", "go",
-  "go ahead", "do it", "okay") confirms the card and "no" or "cancel" cancels
-  it. It is off by default because a misheard "yes" would move the arm.
+- **One word moves the robot.** With voice confirm on (the default now that the
+  words are strict), a card is answered by **"confirm"** or **"go ahead"** as a
+  whole utterance. "yes", "okay" and "go" do not count: they are too easy to
+  mishear or to say in passing. "no" or "cancel" cancels.
+- **"No, point eleven"** is a one-step correction: the card is cancelled, and
+  once the model has finished with the declined move, "point eleven" runs as
+  the next command with one line of context, so the model proposes again
+  ("Point 11 instead. …"). Anything else said over a card that is not a
+  yes-word does the same (a question is not a yes). One correction is held at
+  a time; a second replaces it.
+- **One "no" covers the run.** If the model raises another card for the same
+  command after you declined, it is declined without asking.
+- **A card nobody answers** is cancelled after `confirm_timeout_s` (20 s), and
+  Rosa says so.
+- **The follow-up window.** After Rosa proposes, reports a move, refuses or
+  cancels, the voice app accepts speech without the wake word for
+  `follow_up_s` (8 s), as Alexa's follow-up mode does; the stage says "Your
+  turn". The model's own replies never open it.
 
-If the model is still busy when you speak, nothing is queued: the chat says
-what was heard and asks you to say it again. The session table and the
-summary have a *Via* column (typed or voice).
+If the model is still busy when you speak (and no card is showing), nothing is
+queued: the chat says what was heard and asks you to say it again. The session
+table and the summary have a *Via* column (typed, voice or map) and the loop's
+timings per command: felt delay (from the voice app), think, to confirm,
+motion.
 
 The settings in `settings.json`: `voice_url` (default `http://127.0.0.1:8100`),
-`voice_on`, `voice_confirm`, and `voice_start`, the command that starts the
+`voice_on`, `voice_confirm`, `voice_verbosity`, `voice_persona`, `follow_up_s`,
+`confirm_timeout_s`, `map_ros`, and `voice_start`, the command that starts the
 voice app (`start.sh` runs it in tmux session `voice` alongside the console
 and leaves it alone if it is already running; `tmux kill-session -t voice`
 stops it; its output is in `~/voice.log`).
 
 Getting the voice app onto the robot's computer: copy its folder (including
 the git-ignored `models/`, the downloaded speech models) to, say, `~/voice`,
-make a venv from its `requirements/nvidia.txt` (or `mac.txt`), and leave
-`device: auto` in its `settings.yaml`; its `docs/03-portability.md` has the
-moving-day checklist. The voice app is kept separate on purpose: its speech
-libraries are heavy, its benchmark harness does not need ROS, and the console
-only needs its HTTP side (`voice.py` is the whole link).
+make a venv from its `requirements/nvidia.txt` (or `mac.txt`), fetch a Piper
+voice (`python -m piper.download_voices en_GB-alan-medium --data-dir
+models/piper`; Piper is GPL-3.0 and is cited), and leave `device: auto` in its
+`settings.yaml`; its `docs/03-portability.md` has the moving-day checklist.
+The voice app is kept separate on purpose: its speech libraries are heavy, its
+benchmark harness does not need ROS, and the console only needs its HTTP side
+(`voice.py` is the whole link).
 
 ## The tool buttons
 
@@ -312,14 +379,16 @@ added the same way, one tool per type, never per node.
 | `interfaces.py` | the description file and the write policy |
 | `generic_tools.py` | the tools for the system's own services and topics |
 | `rosa_agent.py` | builds the ROSA agent; `python rosa_agent.py` is a terminal version |
-| `web_console.py`, `static/` | the browser console |
+| `web_console.py` | the console: the loop (phases), the confirm gate, the held corrections, the self-questions and the spoken tour, every route |
+| `lines.py` | what Rosa says at each moment, in two personas, from measured facts |
+| `static/index.html`, `static/stage.html` | the workbench and the stage; both load `view.js` (the 3D view), `panels.js` + `panels.css` (the settings panels) and the stage `map.js` (the capability map) |
 | `setup-machine.sh` | the once-only sudo steps for a fresh Ubuntu 22.04 computer |
 | `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on (`sim`, `real`, `stop`) |
 | `desktop_tools.py` | the tool buttons: the fixed list of programs the console may open |
 | `robot_link.py` | the robot-connection ladder: the checks, the actions, the `robot_status` tool |
-| `voice.py` | the link to the voice app: its event stream, the word tests ("stop", "yes", "no"), the proxied requests |
+| `voice.py` | the link to the voice app: its event stream, the word tests ("stop", "confirm", "no, …"), say/play/follow-up, the proxied requests |
 | `examples/` | the description file and the start scripts for the Strathclyde UR12e cell |
-| `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator |
+| `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator; `tests/mock_console.py` serves the pages with scripted answers for page work on a Mac |
 
 ## Attribution and citing
 
