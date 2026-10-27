@@ -135,7 +135,12 @@ RVIZ_CONFIG = ""
 # console and the console listens to it over HTTP (voice.py). All three are settings.
 VOICE_URL = "http://127.0.0.1:8100"   # where the voice app answers
 VOICE_ON = False                       # the header switch: whether spoken words become commands
-VOICE_CONFIRM = False                  # whether a spoken "yes" / "no" may answer the confirm card
+VOICE_CONFIRM = True                   # whether a spoken "confirm" / "no" may answer the confirm card
+VOICE_VERBOSITY = 1                    # 0 sounds only, 1 read-backs and results spoken, 2 everything (prefaces, cancels)
+VOICE_PERSONA = "A"                    # A the technician (terse), B the colleague (warmer); see lines.py
+FOLLOW_UP_S = 8.0                      # after Rosa addresses you, seconds during which no wake word is needed (0..30)
+CONFIRM_TIMEOUT_S = 20.0               # how long a confirm card waits for an answer before it is cancelled (5..120)
+MAP_ROS = False                        # the map shows ROS names and the undescribed interfaces
 
 
 def package_share(package):
@@ -165,7 +170,7 @@ def apply_settings(settings):
     so a damaged file can never stop the console from starting."""
     global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES, RVIZ_CONFIG
     global ROBOT_MODE, ROBOT_IP, COMPUTER_IP, ROBOT_PORT, NETWORK_PROFILE, URSIM_IP
-    global VOICE_URL, VOICE_ON, VOICE_CONFIRM
+    global VOICE_URL, VOICE_ON, VOICE_CONFIRM, VOICE_VERBOSITY, VOICE_PERSONA, FOLLOW_UP_S, CONFIRM_TIMEOUT_S, MAP_ROS
     url = settings.get("ollama_url")
     if isinstance(url, str) and url.startswith("http"):
         OLLAMA_URL = url.rstrip("/")
@@ -176,6 +181,18 @@ def apply_settings(settings):
         VOICE_ON = settings["voice_on"]
     if isinstance(settings.get("voice_confirm"), bool):
         VOICE_CONFIRM = settings["voice_confirm"]
+    if settings.get("voice_verbosity") in (0, 1, 2):
+        VOICE_VERBOSITY = settings["voice_verbosity"]
+    if settings.get("voice_persona") in ("A", "B"):
+        VOICE_PERSONA = settings["voice_persona"]
+    if isinstance(settings.get("follow_up_s"), (int, float)) and not isinstance(settings["follow_up_s"], bool) \
+            and 0 <= settings["follow_up_s"] <= 30:
+        FOLLOW_UP_S = float(settings["follow_up_s"])
+    if isinstance(settings.get("confirm_timeout_s"), (int, float)) and not isinstance(settings["confirm_timeout_s"], bool) \
+            and 5 <= settings["confirm_timeout_s"] <= 120:
+        CONFIRM_TIMEOUT_S = float(settings["confirm_timeout_s"])
+    if isinstance(settings.get("map_ros"), bool):
+        MAP_ROS = settings["map_ros"]
     if isinstance(settings.get("model"), str) and settings["model"]:
         MODEL = settings["model"]
     if isinstance(settings.get("think"), bool):

@@ -63,3 +63,22 @@ def test_voice_settings_are_applied_and_checked(tmp_path, monkeypatch):
     f.write_text(json.dumps({"voice_url": "ten dot two"}))
     config.apply_settings(config.load_settings(f))
     assert config.VOICE_URL == "http://10.0.0.2:8100"      # not a web address: ignored
+
+
+def test_voice_output_settings_are_applied_and_checked(tmp_path, monkeypatch):
+    for name, value in (("VOICE_VERBOSITY", 1), ("VOICE_PERSONA", "A"), ("FOLLOW_UP_S", 8.0), ("CONFIRM_TIMEOUT_S", 20.0)):
+        monkeypatch.setattr(config, name, value, raising=False)
+    f = tmp_path / "settings.json"
+    f.write_text(json.dumps({"voice_verbosity": 2, "voice_persona": "B", "follow_up_s": 31, "confirm_timeout_s": 4}))
+    config.apply_settings(config.load_settings(f))
+    assert config.VOICE_VERBOSITY == 2 and config.VOICE_PERSONA == "B"
+    assert config.FOLLOW_UP_S == 8.0 and config.CONFIRM_TIMEOUT_S == 20.0      # out of range: ignored
+    f.write_text(json.dumps({"voice_verbosity": 7, "voice_persona": "Z", "follow_up_s": 0, "confirm_timeout_s": 60}))
+    config.apply_settings(config.load_settings(f))
+    assert config.VOICE_VERBOSITY == 2 and config.VOICE_PERSONA == "B"
+    assert config.FOLLOW_UP_S == 0 and config.CONFIRM_TIMEOUT_S == 60.0
+
+
+def test_voice_confirm_defaults_on():
+    import importlib, os
+    assert config.VOICE_CONFIRM is True or os.environ.get("ROSA_SETTINGS")   # the default, unless a file set it

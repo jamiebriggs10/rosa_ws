@@ -48,11 +48,16 @@ from langchain_core.messages import HumanMessage
 import config
 import desktop_tools
 import generic_tools
+import lines
 import robot_link
 import robot_tools
 import voice
 
-CONFIRM_TIMEOUT_S = 60
+# The loop: one phase at a time, each shown by the page as a lamp and (later) a sound and a line.
+PHASES = ("idle", "listening", "heard", "thinking", "proposing", "moving", "done", "refused", "cancelled",
+          "stopped", "follow")
+END_PHASE = {"done": "done", "no_motion": "done", "refused": "refused", "stopped": "stopped",
+             "cancelled": "cancelled", "failed": "refused"}
 SESSIONS_DIR = pathlib.Path(__file__).parent / "sessions"
 SAVED_FILE = SESSIONS_DIR / "saved_moves.json"
 MOVE_TOOLS = {"move_by", "move_to", "move_path", "move_formula", "move_joint", "go_home"}   # the tools that can be re-run
@@ -80,20 +85,57 @@ class Console:
         self.saved = self._load_saved()       # moves kept for re-running, survive restarts
         self.voice_stopped = False            # a spoken "stop" has already stopped the arm for this utterance
         self._via = None                      # where the running command came from ("voice"), for its record
+        # The loop (see PHASES). Each change is timestamped into the running command's record.
+        self.phase, self.phase_since = "idle", time.time()
+        self._phases = []
+        self.follow_until = 0.0               # until when the voice app listens without the wake word (0: closed)
+        self.held = None                      # a correction kept for after the current command ("no, point eleven")
+        self.declined_run = False             # the operator said no once in this run: no more cards for it
+        self.lit = []                         # map nodes a spoken tour is pointing at right now
+        self.said = ""                        # the last line Rosa was asked to say
+        self._later = None                    # the timer that returns a finished phase to idle
         robot_tools.set_confirm_handler(self.ask_operator)
+
+    # -- the loop --------------------------------------------------------------
+    def set_phase(self, name):
+        """Move the loop on. The record of the running command keeps every change with its time."""
+        self.phase, self.phase_since = name, time.time()
+        self._phases.append([name, self.phase_since])
+
+    def _rest(self, after_s=None):
+        """A finished phase (done, refused, cancelled, stopped) returns to idle after a while,
+        unless something else has started by then."""
+        if self._later:
+            self._later.cancel()
+        ending = self.phase
+
+        def back():
+            if self.phase == ending and not self.busy and not self.pending:
+                self.set_phase("idle")
+        self._later = threading.Timer(config.FOLLOW_UP_S if after_s is None else after_s, back)
+        self._later.daemon = True
+        self._later.start()
 
     # -- the operator gate ---------------------------------------------------
     def ask_operator(self, description, preview=None):
-        """Called from the agent thread by a tool. Blocks until the page answers."""
+        """Called from the agent thread by a tool. Blocks until the page answers, or the card
+        times out (config.CONFIRM_TIMEOUT_S), which counts as no."""
         self._answered.clear()
-        self.pending = {"id": str(time.time()), "text": description, "preview": preview}
-        answered = self._answered.wait(timeout=CONFIRM_TIMEOUT_S)
+        self.pending = {"id": str(time.time()), "text": description, "preview": preview,
+                        "facts": (preview or {}).get("facts") if isinstance(preview, dict) else None}
+        self.set_phase("proposing")
+        answered = self._answered.wait(timeout=config.CONFIRM_TIMEOUT_S)
         self.pending = None
+        if not answered:
+            self.set_phase("cancelled")
         return bool(answered and self._answer)
 
     def answer(self, confirmation_id, ok):
         if self.pending and self.pending["id"] == confirmation_id:
             self._answer = ok
+            self.set_phase("moving" if ok else "cancelled")
+            if not ok:
+                self.declined_run = True
             self._answered.set()
             return True
         return False
@@ -113,6 +155,8 @@ class Console:
             if self.busy:
                 return False
             self.busy, self.busy_since = True, time.time()
+        self._phases, self.declined_run, self.follow_until, self.lit = [], False, 0.0, []
+        self.set_phase("thinking")
         message = {"who": "you", "text": shown_text}
         if via:
             message["via"] = via
@@ -148,11 +192,13 @@ class Console:
         total = round(time.time() - t0, 1)
         self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": total,
                               "command": command})
+        self.set_phase(END_PHASE.get(events[-1]["outcome"], "done") if events else "done")
         self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
                              "think": config.THINK, "command": shown_text, "via": via or "typed", "events": events,
-                             "total_s": total, "reply": reply})
+                             "total_s": total, "reply": reply, "phases": list(self._phases)})
         self._current = None
         self.busy = False
+        self._rest()
 
     def _remember_moves(self, events, by_model):
         """Add an exact record of what was done (tools, numbers or formulas, outcomes, positions)
@@ -188,13 +234,16 @@ class Console:
         except Exception:
             pass
         waited = round(time.time() - self.busy_since, 1)
+        self.set_phase("cancelled")
         self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
                              "think": config.THINK, "command": self.messages[-1]["text"], "via": self._via or "typed",
-                             "events": list(robot_tools.events), "total_s": waited, "reply": "(stopped by the operator)"})
+                             "events": list(robot_tools.events), "total_s": waited, "reply": "(stopped by the operator)",
+                             "phases": list(self._phases)})
         self._current = None
         self._agent = None                    # the old one is still busy; start the next command afresh
         if self.pending:
             self.answer(self.pending["id"], False)
+        self._rest(3)
         self.messages.append({"who": "robot", "text": f"Stopped after {waited} s. Nothing more will be done "
                               "for that command. Earlier messages are forgotten.", "events": [], "total_s": waited})
         self.busy = False
@@ -305,6 +354,9 @@ class Console:
         if self.pending:
             self.answer(self.pending["id"], False)
         message = robot_tools.stop.invoke({})
+        self.set_phase("stopped")
+        if not self.busy:
+            self._rest(3)
         self.messages.append({"who": "robot", "text": f"{note} {message}" if note else message, "events": [], "total_s": 0})
         return message
 
@@ -331,7 +383,11 @@ class Console:
                                       "events": [], "total_s": 0})
             return "stopped"
         if partial:
+            if not self.busy and self.phase != "listening":
+                self.set_phase("listening")
             return "ignored"
+        if not self.busy:
+            self.set_phase("heard")
         pending = self.pending
         if pending and config.VOICE_CONFIRM:
             if voice.says_yes(text) and self.answer(pending["id"], True):
@@ -351,26 +407,60 @@ class Console:
     def voice_idle(self):
         """The voice app is back to idle: the next utterance may stop the arm again."""
         self.voice_stopped = False
+        if self.phase in ("listening", "heard") and not self.busy:
+            self.set_phase("idle")
 
     # -- session file --------------------------------------------------------
     def finish(self):
         SESSIONS_DIR.mkdir(exist_ok=True)
         path = SESSIONS_DIR / self.started.strftime("%Y-%m-%d-%H%M.md")
-        lines = [f"# Session {self.started:%Y-%m-%d %H:%M}", "",
-                 "| Time | Model | Thinking | Command | Via | Tool calls | First tool after | To motion | Total | Reply |",
-                 "|---|---|---|---|---|---|---|---|---|---|"]
+        rows = [f"# Session {self.started:%Y-%m-%d %H:%M}", "",
+                "| Time | Model | Thinking | Command | Via | Felt | Think | To confirm | Motion | Tool calls | "
+                "First tool after | To motion | Total | Reply |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for r in self.records:
             calls = "; ".join(f"{e['tool']} {e['args']} ({e['outcome']})" for e in r["events"]) or "none"
             motion = ", ".join(f"{e['to_motion_s']} s" for e in r["events"] if "to_motion_s" in e) or ""
             reply = r["reply"].replace("\n", " ").replace("|", "/")
             first = f"{r['events'][0]['after_s']} s" if r["events"] and "after_s" in r["events"][0] else ""
-            lines.append(f"| {r['time']} | {r['model']} | {'on' if r.get('think') else 'off'} | {r['command']} | "
-                         f"{r.get('via', 'typed')} | {calls} | {first} | {motion} | {r['total_s']} s | {reply} |")
-        path.write_text("\n".join(lines) + "\n")
+            t = timings(r)
+            rows.append(f"| {r['time']} | {r['model']} | {'on' if r.get('think') else 'off'} | {r['command']} | "
+                        f"{r.get('via', 'typed')} | {t['felt']} | {t['think']} | {t['to_confirm']} | {t['motion']} | "
+                        f"{calls} | {first} | {motion} | {r['total_s']} s | {reply} |")
+        path.write_text("\n".join(rows) + "\n")
         return {"path": str(path), "records": self.records}
 
 
+def timings(record):
+    """The loop's timings for one record, as table cells: felt delay (from the voice app),
+    think (thinking to the proposal or the end), to confirm (proposing to moving), motion."""
+    phases = record.get("phases") or []
+
+    def span(start, ends):
+        t0 = next((t for name, t in phases if name == start), None)
+        if t0 is None:
+            return ""
+        t1 = next((t for name, t in phases if name in ends and t >= t0), None)
+        return f"{t1 - t0:.1f} s" if t1 is not None else ""
+    felt = record.get("felt_ms")
+    return {"felt": f"{felt / 1000:.2f} s" if isinstance(felt, (int, float)) else "",
+            "think": span("thinking", ("proposing", "done", "refused", "cancelled", "stopped")),
+            "to_confirm": span("proposing", ("moving",)),
+            "motion": span("moving", ("done", "refused", "stopped", "cancelled"))}
+
+
 # -- status checks, each answering in under a second ----------------------------
+
+_status_cache = {}        # {"at": time, "value": status()}: the stage polls four times a second
+
+
+def _cached_status():
+    """status() at most once a second, so a fast poll never hits Ollama repeatedly."""
+    now = time.time()
+    if _status_cache.get("value") is None or now - _status_cache.get("at", 0) > 1.0:
+        _status_cache.update(at=now, value=status())
+    return _status_cache["value"]
+
 
 def ollama_up():
     try:
@@ -459,7 +549,15 @@ def index():
 
 @app.get("/state")
 def state():
-    return jsonify(status=status(), busy=console.busy, pending=console.pending,
+    follow_left = max(0.0, console.follow_until - time.time())
+    if console.phase == "follow" and follow_left == 0 and not console.busy:
+        console.set_phase("idle")
+    return jsonify(status=_cached_status(), busy=console.busy, pending=console.pending,
+                   phase=console.phase, phase_since_s=round(time.time() - console.phase_since, 1),
+                   follow_until_s=round(follow_left, 1), trace=console_trace(), lit=console.lit,
+                   held=console.held, said=console.said, verbosity=config.VOICE_VERBOSITY,
+                   persona=config.VOICE_PERSONA, follow_up_s=config.FOLLOW_UP_S,
+                   confirm_timeout_s=config.CONFIRM_TIMEOUT_S, map_ros=config.MAP_ROS,
                    busy_for_s=round(time.time() - console.busy_since, 1) if console.busy else 0,
                    messages=console.messages, model=config.MODEL, think=config.THINK,
                    pendant=config.PENDANT_URL, joint_list=config.JOINTS, saved=console.saved,
@@ -467,6 +565,12 @@ def state():
                    shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
                    frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME}, tools=desktop_tools.rows(),
                    robot=robot_link.latest, local=_local(), voice=voice_state())
+
+
+def console_trace():
+    """Which tool is running right now, for the map's lit path; None when none is."""
+    tool = robot_tools._current_event.get("tool") if console.busy else None
+    return {"tool": tool} if tool else None
 
 
 def voice_state():

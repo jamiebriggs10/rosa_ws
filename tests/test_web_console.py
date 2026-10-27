@@ -571,3 +571,45 @@ def test_voice_proxy_passes_status_and_body_through(client, monkeypatch):
     monkeypatch.setattr(web_console.voice_link, "request", unreachable)
     r = client.get("/voice/status")
     assert r.status_code == 502 and "not answering" in r.get_json()["error"]
+
+
+# ---- the loop: phases with timestamps, cached status, the new voice settings ----
+
+def test_phases_follow_a_command(client):
+    client.agent.action = lambda: (web_console.console.ask_operator("move", {"facts": {"kind": "line"}}), "ok")[1]
+    client.post("/command", json={"text": "move"})
+    wait_until(lambda: web_console.console.pending)
+    assert client.get("/state").get_json()["phase"] == "proposing"
+    pid = web_console.console.pending["id"]
+    client.post("/confirm", json={"id": pid, "ok": True})
+    wait_until(lambda: not web_console.console.busy)
+    names = [p[0] for p in web_console.console.records[-1]["phases"]]
+    assert names[:3] == ["thinking", "proposing", "moving"] and names[-1] in ("done", "idle")
+    assert all(isinstance(p[1], float) for p in web_console.console.records[-1]["phases"])
+
+
+def test_status_is_cached_for_a_second(client, monkeypatch):
+    calls = {"n": 0}
+
+    def counting():
+        calls["n"] += 1
+        return {"ollama": True, "moveit": False, "joint_states": False, "joints": {}, "tool_cm": None, "hint": ""}
+    monkeypatch.setattr(web_console, "status", counting)
+    web_console._status_cache.clear()
+    for _ in range(5):
+        client.get("/state")
+    assert calls["n"] == 1
+
+
+def test_new_settings_are_in_state(client):
+    s = client.get("/state").get_json()
+    assert s["verbosity"] == 1 and s["persona"] == "A" and s["follow_up_s"] == 8 and s["confirm_timeout_s"] == 20
+    assert s["phase"] == "idle" and s["follow_until_s"] == 0 and s["trace"] is None and s["lit"] == [] and s["held"] is None
+
+
+def test_finish_has_the_timing_columns(client, tmp_path):
+    client.post("/command", json={"text": "hello"})
+    wait_until(lambda: not web_console.console.busy)
+    r = client.post("/finish").get_json()
+    text = open(r["path"]).read()
+    assert "| Felt | Think | To confirm | Motion |" in text
