@@ -727,3 +727,108 @@ def test_one_no_covers_the_run_with_a_click_too(client, voice_on):
     client.post("/confirm", json={"id": c.pending["id"], "ok": False})
     wait_until(lambda: not c.busy, timeout=5)
     assert asked == [False, False]
+
+
+# ---- say, play, follow-up: every phase has a sound and, by verbosity, a line ----
+
+class RecordingLink:
+    """Stands in for voice.VoiceLink: keeps what the console asked the voice app to do."""
+
+    def __init__(self):
+        self.say_calls, self.play_calls, self.followup_calls, self.hushes = [], [], [], 0
+        self.latest = {"running": True, "speaking": False, "state": "idle"}
+
+    def say(self, text): self.say_calls.append(text)
+    def play(self, name): self.play_calls.append(name)
+    def followup(self, seconds): self.followup_calls.append(seconds)
+    def hush(self): self.hushes += 1
+    def set_on(self, on): return None
+    def request(self, *a, **k): raise web_console.voice.VoiceUnavailable("fake")
+    def reconnect(self): pass
+
+
+@pytest.fixture
+def recorder(monkeypatch):
+    link = RecordingLink()
+    monkeypatch.setattr(web_console, "voice_link", link)
+    monkeypatch.setattr(web_console.config, "VOICE_VERBOSITY", 1)
+    monkeypatch.setattr(web_console.config, "VOICE_PERSONA", "A")
+    return link
+
+
+def line_agent(client, facts):
+    def invoke(text):
+        ok = web_console.console.ask_operator("a card", {"facts": facts, "path_deg": [[0] * 6], "joints": [], "seconds": 6})
+        return "moved" if ok else "cancelled"
+    client.agent.invoke = invoke
+
+
+def test_a_proposal_is_played_said_and_opens_a_follow_up(client, recorder):
+    c = web_console.console
+    line_agent(client, {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6})
+    client.post("/command", json={"text": "go to point ten"})
+    wait_until(lambda: c.pending)
+    wait_until(lambda: recorder.say_calls)
+    assert recorder.play_calls[-1] == "ask"
+    assert recorder.say_calls[-1] == "Point 10. 14 centimetres, 6 seconds, path clear. Confirm?"
+    assert recorder.followup_calls[-1] == 20 and client.get("/state").get_json()["said"] == recorder.say_calls[-1]
+    c.answer(c.pending["id"], False)
+    wait_until(lambda: not c.busy)
+
+
+def test_verbosity_zero_plays_but_never_says(client, recorder, monkeypatch):
+    monkeypatch.setattr(web_console.config, "VOICE_VERBOSITY", 0)
+    c = web_console.console
+    line_agent(client, {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6})
+    client.post("/command", json={"text": "go to point ten"})
+    wait_until(lambda: c.pending)
+    assert "ask" in recorder.play_calls and recorder.say_calls == []
+    c.answer(c.pending["id"], False)
+    wait_until(lambda: not c.busy)
+    assert recorder.say_calls == [] and "cancel" in recorder.play_calls
+
+
+def test_done_move_opens_a_follow_up_window_and_state_counts_it_down(client, recorder, monkeypatch):
+    c = web_console.console
+
+    def invoke(text):
+        ok = web_console.console.ask_operator("a card", {"facts": {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6}})
+        robot_tools.events.append({"tool": "move_to", "args": {}, "outcome": "done", "message": "Done."})
+        return "moved" if ok else "cancelled"
+    client.agent.invoke = invoke
+    client.post("/command", json={"text": "go to point ten"})
+    wait_until(lambda: c.pending)
+    c.answer(c.pending["id"], True)
+    wait_until(lambda: not c.busy)
+    s = client.get("/state").get_json()
+    assert s["phase"] == "follow" and 6 <= s["follow_until_s"] <= 8
+    assert recorder.play_calls[-1] == "done" and recorder.say_calls[-1] == "At Point 10." and recorder.followup_calls[-1] == 8
+    client.agent.invoke = lambda text: "echo"             # a plain command closes the window at once
+    client.post("/command", json={"text": "hello"})
+    assert client.get("/state").get_json()["follow_until_s"] == 0
+
+
+def test_refusal_is_said_the_same_in_both_personas(client, recorder, monkeypatch):
+    c = web_console.console
+    said = {}
+    for persona in ("A", "B"):
+        monkeypatch.setattr(web_console.config, "VOICE_PERSONA", persona)
+
+        def invoke(text):
+            robot_tools.events.append({"tool": "move_by", "args": {}, "outcome": "refused", "message": "REFUSED by safety layer: too far. Nothing was moved."})
+            return "refused"
+        client.agent.invoke = invoke
+        client.post("/command", json={"text": "up fifty"})
+        wait_until(lambda: not c.busy)
+        said[persona] = recorder.say_calls[-1]
+    assert said["A"] == said["B"] and said["A"].startswith("REFUSED") and recorder.play_calls[-1] == "refused"
+
+
+def test_felt_delay_lands_in_the_record(client, voice_on, recorder):
+    c = web_console.console
+    assert c.heard("move up") == "sent"
+    c.voice_timings(412)
+    wait_until(lambda: not c.busy)
+    assert c.records[-1]["felt_ms"] == 412
+    text = open(client.post("/finish").get_json()["path"]).read()
+    assert "| 0.41 s |" in text

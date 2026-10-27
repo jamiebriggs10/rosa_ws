@@ -239,3 +239,26 @@ def test_request_can_try_another_address(fake):
     link = voice.VoiceLink(url=closed_port_url)
     status, body = link.request("GET", "/status", base=app.url + "/")
     assert status == 200 and body["state"] == "idle"
+
+
+# -- speaking back: say, play, follow-up, and the speaking event ---------------------------
+
+def test_say_play_followup_post_and_swallow_errors(fake):
+    app = fake([])
+    link = voice.VoiceLink(url=lambda: app.url)
+    link.say("Hello"); link.play("ask"); link.followup(8); link.hush()
+    wait_until(lambda: len(app.posts) == 4)
+    assert ("/say", {"text": "Hello"}) in app.posts and ("/play", {"name": "ask"}) in app.posts
+    assert ("/followup", {"seconds": 8}) in app.posts and ("/say", {"cancel": True}) in app.posts
+    voice.VoiceLink(url=closed_port_url).say("nobody")           # must not raise, must not block
+    voice.VoiceLink(url=closed_port_url).play("ask")
+
+
+def test_speaking_and_followup_events_fill_latest_and_timings_call_back(fake, monkeypatch):
+    monkeypatch.setattr(config, "VOICE_ON", False)
+    app = fake([("speaking", {"on": True}), ("followup", {"until_s": 7.5}), ("speaking", {"on": False}),
+                ("timings", {"derived": {"felt_delay_ms": 333}})])
+    felt = []
+    link = voice.VoiceLink(url=lambda: app.url, on_timings=felt.append)
+    link.listen_once()
+    assert link.latest["speaking"] is False and link.latest["followup_s"] == 7.5 and felt == [333]

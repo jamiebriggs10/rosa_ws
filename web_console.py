@@ -95,6 +95,8 @@ class Console:
         self.said = ""                        # the last line Rosa was asked to say
         self.timed_out = None                 # the label of a card nobody answered, for the spoken line
         self._last_label = None               # what the last card proposed, for the held correction's context
+        self._changed = False                 # this command is a held correction: the proposal says "instead"
+        self._felt_ms = None                  # the voice app's felt delay for the spoken command running now
         self._later = None                    # the timer that returns a finished phase to idle
         robot_tools.set_confirm_handler(self.ask_operator)
 
@@ -103,6 +105,42 @@ class Console:
         """Move the loop on. The record of the running command keeps every change with its time."""
         self.phase, self.phase_since = name, time.time()
         self._phases.append([name, self.phase_since])
+
+    def _announce(self, phase, **facts):
+        """Every phase has a sound; by verbosity, a spoken line too. The words come from lines.py and
+        the facts the console measured. All of it goes to the voice app and never blocks."""
+        v, persona = config.VOICE_VERBOSITY, config.VOICE_PERSONA
+        sound, kind, level = {
+            "listening": ("listen", None, 9), "heard": ("heard", None, 9), "thinking": ("think", "preface", 2),
+            "proposing": ("ask", "propose", 1), "moving": ("go", None, 9), "done": ("done", "done", 1),
+            "refused": ("refused", "refused", 1), "cancelled": ("cancel", "cancel", 2), "stopped": ("cancel", "stopped", 1),
+        }.get(phase, (None, None, 9))
+        if sound:
+            voice_link.play(sound)
+        kind = facts.pop("kind", kind)
+        if not kind or v < facts.pop("level", level):
+            return
+        try:
+            text = lines.line(kind, persona, **facts)
+        except (KeyError, IndexError):
+            return
+        self.said = text
+        voice_link.say(text)
+
+    def _open_follow_up(self, seconds=None):
+        """Rosa has just addressed the operator: for a while, no wake word is needed."""
+        seconds = config.FOLLOW_UP_S if seconds is None else seconds
+        if seconds <= 0:
+            return
+        self.follow_until = time.time() + seconds
+        voice_link.followup(seconds)
+
+    def voice_timings(self, felt_ms):
+        """The voice app's felt delay for the utterance it just finished: kept with that command's record."""
+        self._felt_ms = felt_ms
+        if self.records and self.records[-1].get("via") == "voice" and "felt_ms" not in self.records[-1] \
+                and not self.busy:
+            self.records[-1]["felt_ms"] = felt_ms
 
     def _rest(self, after_s=None):
         """A finished phase (done, refused, cancelled, stopped) returns to idle after a while,
@@ -129,18 +167,35 @@ class Console:
         self._answered.clear()
         self.pending = {"id": str(time.time()), "text": description, "preview": preview, "facts": facts}
         self.set_phase("proposing")
+        self._announce("proposing", **self._proposal_facts(facts, description))
+        self._open_follow_up(config.CONFIRM_TIMEOUT_S)
         answered = self._answered.wait(timeout=config.CONFIRM_TIMEOUT_S)
         self.pending = None
         if not answered:
             self.timed_out = self._last_label
             self.declined_run = True
             self.set_phase("cancelled")
+            self._announce("cancelled", kind="timeout", level=1, label=self._last_label)
         return bool(answered and self._answer)
+
+    def _proposal_facts(self, facts, description):
+        """The spoken proposal's kind and facts from a card's facts dict."""
+        f = dict(facts or {})
+        kind = f.pop("kind", None)
+        label = f.get("label") or description[:40]
+        if kind == "trigger":
+            return {"kind": "propose_trigger", "label": label}
+        if kind == "joint":
+            return {"kind": "propose_joint", "label": label, "largest_turn_deg": f.get("largest_turn_deg", 0),
+                    "seconds": f.get("seconds", 0)}
+        return {"kind": "changed" if self._changed else "propose", "label": label,
+                "distance_cm": f.get("distance_cm", 0), "seconds": f.get("seconds", 0)}
 
     def answer(self, confirmation_id, ok):
         if self.pending and self.pending["id"] == confirmation_id:
             self._answer = ok
             self.set_phase("moving" if ok else "cancelled")
+            self._announce("moving" if ok else "cancelled")
             if not ok:
                 self.declined_run = True
             self._answered.set()
@@ -165,6 +220,7 @@ class Console:
             self.busy, self.busy_since = True, time.time()
         self._phases, self.declined_run, self.follow_until, self.lit, self.timed_out = [], False, 0.0, [], None
         self.set_phase("thinking")
+        self._announce("thinking")
         message = {"who": "you", "text": shown_text}
         if via:
             message["via"] = via
@@ -200,19 +256,50 @@ class Console:
         total = round(time.time() - t0, 1)
         self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": total,
                               "command": command})
-        self.set_phase(END_PHASE.get(events[-1]["outcome"], "done") if events else "done")
-        self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
-                             "think": config.THINK, "command": shown_text, "via": via or "typed", "events": events,
-                             "total_s": total, "reply": reply, "phases": list(self._phases)})
+        end = END_PHASE.get(events[-1]["outcome"], "done") if events else "done"
+        self.set_phase(end)
+        self._announce_end(end, events, reply)
+        record = {"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
+                  "think": config.THINK, "command": shown_text, "via": via or "typed", "events": events,
+                  "total_s": total, "reply": reply, "phases": list(self._phases)}
+        if via == "voice" and self._felt_ms is not None:
+            record["felt_ms"], self._felt_ms = self._felt_ms, None
+        self.records.append(record)
         self._current = None
         self.busy = False
-        self._rest()
+        self._changed = False
+        moved = any(e["tool"] in MOVE_TOOLS or e["outcome"] in ("stopped", "refused") for e in events)
+        if end in ("done", "refused", "stopped") and moved:
+            self.set_phase("follow")          # Rosa has just reported: the operator can answer without the wake word
+            self._open_follow_up()
+        elif end == "cancelled":
+            self.set_phase("follow")
+            self._open_follow_up()
+        else:
+            self._rest(3)
         if self.held:
             # A correction said over a card ("no, point eleven"): now that the model has finished
             # with the declined move, the rest runs as its own command, with one line of context.
             text, self.held = self.held, None
             label = self._last_label or "that"
-            self.submit(f'(The operator declined "{label}" and said instead:) {text}', via=via, shown=text)
+            if self.submit(f'(The operator declined "{label}" and said instead:) {text}', via=via, shown=text):
+                self._changed = True
+
+    def _announce_end(self, end, events, reply):
+        """The sound and the line for how a command ended, from what the tools recorded."""
+        last = events[-1] if events else None
+        if end == "cancelled":
+            return                            # already announced when the card was answered or timed out
+        if end == "refused":
+            self._announce("refused", reason=(last or {}).get("message", "Refused."))
+        elif end == "stopped":
+            self._announce("stopped", kind="result", text=(last or {}).get("message", "Stopped."))
+        elif last and last["tool"] in MOVE_TOOLS:
+            self._announce("done", label=self._last_label or "there")
+        elif last and last["tool"] == "call_trigger":
+            self._announce("done", kind="done_trigger", label=self._last_label or last["args"].get("service", "done"))
+        else:
+            self._announce("done", kind="result", text=reply)
 
     def _remember_moves(self, events, by_model):
         """Add an exact record of what was done (tools, numbers or formulas, outcomes, positions)
@@ -369,6 +456,11 @@ class Console:
             self.answer(self.pending["id"], False)
         message = robot_tools.stop.invoke({})
         self.set_phase("stopped")
+        tool = (_cached_status() or {}).get("tool_cm")
+        if tool:
+            self._announce("stopped", x=round(tool[0]), y=round(tool[1]), z=round(tool[2]))
+        else:
+            self._announce("stopped", kind="result", text="Stopped.")
         if not self.busy:
             self._rest(3)
         self.messages.append({"who": "robot", "text": f"{note} {message}" if note else message, "events": [], "total_s": 0})
@@ -399,9 +491,11 @@ class Console:
         if partial:
             if not self.busy and self.phase != "listening":
                 self.set_phase("listening")
+                self._announce("listening")
             return "ignored"
         if not self.busy:
             self.set_phase("heard")
+        self._announce("heard")
         pending = self.pending
         if pending and config.VOICE_CONFIRM:
             if voice.says_yes(text) and self.answer(pending["id"], True):
@@ -555,7 +649,7 @@ console = None   # set in main() or by the tests
 
 # The link to the voice app (voice.py). Its callbacks run on the link's own thread and look
 # `console` up when called, because the tests replace it.
-voice_link = voice.VoiceLink(on_final=lambda text: console.heard(text),
+voice_link = voice.VoiceLink(on_final=lambda text: console.heard(text), on_timings=lambda ms: console.voice_timings(ms),
                              on_partial=lambda text: console.heard(text, partial=True),
                              on_idle=lambda: console.voice_idle())
 
@@ -875,7 +969,7 @@ def voice_url():
 
 
 # The voice app's pages the pop-up may use. /wake is not among them: the switch is the console's.
-VOICE_PROXIED = re.compile(r"options|settings|status|history|presets|presets/[\w-]+|presets/[\w-]+/load|ptt/(down|up)|help")
+VOICE_PROXIED = re.compile(r"options|settings|status|history|presets|presets/[\w-]+|presets/[\w-]+/load|ptt/(down|up)|help|say|play|followup")
 
 
 @app.route("/voice/<path:sub>", methods=["GET", "POST"])

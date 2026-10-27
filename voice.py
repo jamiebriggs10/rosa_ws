@@ -79,7 +79,8 @@ class VoiceUnavailable(Exception):
 
 def _fresh():
     return {"running": False, "state": "", "wake_on": None, "level": None, "partial": "", "final": "",
-            "felt_ms": None, "outcome": "", "loading": "", "error": "", "summary": "", "device": "", "action": ""}
+            "felt_ms": None, "outcome": "", "loading": "", "error": "", "summary": "", "device": "", "action": "",
+            "speaking": False, "followup_s": 0}
 
 
 def _json(response):
@@ -90,9 +91,9 @@ def _json(response):
 
 
 class VoiceLink:
-    def __init__(self, url=None, on_final=None, on_partial=None, on_idle=None):
+    def __init__(self, url=None, on_final=None, on_partial=None, on_idle=None, on_timings=None):
         self._url = url or (lambda: config.VOICE_URL)      # a function, so a changed setting is picked up
-        self.on_final, self.on_partial, self.on_idle = on_final, on_partial, on_idle
+        self.on_final, self.on_partial, self.on_idle, self.on_timings = on_final, on_partial, on_idle, on_timings
         self.latest = _fresh()
         self._sock = None                                   # the open stream's socket, so reconnect() can cut it
         self._lock = threading.Lock()
@@ -128,6 +129,32 @@ class VoiceLink:
             return None
         except VoiceUnavailable as e:
             return str(e)
+
+    # -- speaking back: fire-and-forget, so a phase change never waits for the voice app ------
+
+    def _post_later(self, path, body):
+        def go():
+            try:
+                self.request("POST", path, body)
+            except VoiceUnavailable:
+                pass                           # no voice app: the console simply makes no sound
+        threading.Thread(target=go, daemon=True, name="voice-say").start()
+
+    def say(self, text):
+        """Ask the voice app to speak a line (the console composes it, lines.py)."""
+        if text:
+            self._post_later("/say", {"text": text})
+
+    def hush(self):
+        self._post_later("/say", {"cancel": True})
+
+    def play(self, name):
+        """One of the state sounds: listen, heard, ask, go, done, cancel, refused, think."""
+        self._post_later("/play", {"name": name})
+
+    def followup(self, seconds):
+        """For `seconds`, the voice app listens without the wake word (Rosa has just asked something)."""
+        self._post_later("/followup", {"seconds": seconds})
 
     # -- the stream -----------------------------------------------------------------
 
@@ -235,6 +262,12 @@ class VoiceLink:
             latest["action"] = self._call(self.on_final, latest["final"]) or ""
         elif kind == "timings":
             latest["felt_ms"] = (data.get("derived") or {}).get("felt_delay_ms")
+            if latest["felt_ms"] is not None:
+                self._call(self.on_timings, latest["felt_ms"])
+        elif kind == "speaking":
+            latest["speaking"] = bool(data.get("on"))
+        elif kind == "followup":
+            latest["followup_s"] = data.get("until_s", 0)
         elif kind == "loading":
             latest["loading"] = "" if data.get("done") else f"loading {data.get('stage')}: {data.get('option')}…"
         elif kind == "error":
