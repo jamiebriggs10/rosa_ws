@@ -157,3 +157,12 @@ def test_capabilities_text_lists_meanings_and_missing(fake):
     assert "/touchdown_test/execute" in text and "[moves the robot]" in text
     assert "MISSING /inspection/raster_path" in text
     assert "Read-only (not described):" in text and "/compute_cartesian_path (moveit_msgs/srv/GetCartesianPath)" in text
+
+
+def test_gate_passes_trigger_facts_to_the_operator(fake, monkeypatch):
+    got = {}
+    monkeypatch.setattr(robot_tools, "_confirm_handler", lambda what, preview=None: got.update(preview=preview) or False)
+    generic_tools.call_trigger.invoke({"service": "/touchdown_test/execute"})
+    facts = got["preview"]["facts"]
+    assert facts["kind"] == "trigger" and facts["name"] == "/touchdown_test/execute"
+    assert facts["label"] and "Run the previewed touchdown" in facts["label"]

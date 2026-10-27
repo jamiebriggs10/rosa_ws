@@ -560,11 +560,11 @@ async function refresh() {
     const p = s.pending.preview;
     gate.innerHTML = `<div class="gate"><div class="title">Confirm this move</div>
       <div class="what mono">${esc(s.pending.text)}</div>
-      <button class="confirm">Confirm and move</button><button class="cancel">Cancel</button>${p ? '<button class="preview">Visualise</button>' : ''}</div>`;
+      <button class="confirm">Confirm and move</button><button class="cancel">Cancel</button>${p && p.path_deg ? '<button class="preview">Visualise</button>' : ''}</div>`;
     gate.querySelector(".confirm").onclick = () => post("/confirm", {id: pendingId, ok: true});
     gate.querySelector(".cancel").onclick = () => post("/confirm", {id: pendingId, ok: false});
-    if (p) gate.querySelector(".preview").onclick = () => window.visualise && window.visualise(p.joints, p.path_deg, p.seconds);
-    if (p && window.showRoute) window.showRoute(p.joints, p.path_deg, p.points_cm);
+    if (p && p.path_deg) gate.querySelector(".preview").onclick = () => window.visualise && window.visualise(p.joints, p.path_deg, p.seconds);
+    if (p && p.path_deg && window.showRoute) window.showRoute(p.joints, p.path_deg, p.points_cm);
     const m = s.pending.text.match(/joint (\d)/);
     highlightJoint(m ? m[1] : null);
   } else if (!s.pending && pendingId) { pendingId = null; gate.innerHTML = ""; highlightJoint(null); if (window.hideGhost) window.hideGhost(); }

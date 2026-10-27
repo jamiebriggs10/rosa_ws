@@ -287,13 +287,15 @@ def set_confirm_handler(handler):
     _confirm_handler = handler
 
 
-def _confirm(description, trajectory, points_cm=None):
-    """Ask the operator, and note how long they took so timings stay honest."""
+def _confirm(description, trajectory, points_cm=None, facts=None):
+    """Ask the operator, and note how long they took so timings stay honest. `facts` is the
+    structured version of the description (label, distances, seconds) for the spoken read-back
+    and the stage; it rides along in the preview."""
     jt = trajectory.joint_trajectory
     path = [[round(math.degrees(p), 2) for p in point.positions] for point in jt.points]
     step = max(1, len(path) // 50)                # 50 frames is plenty for the preview
     preview = {"joints": list(jt.joint_names), "path_deg": path[::step] + path[-1:],
-               "seconds": round(_seconds(trajectory), 1), "points_cm": points_cm}
+               "seconds": round(_seconds(trajectory), 1), "points_cm": points_cm, "facts": facts}
     t0 = time.time()
     ok = _confirm_handler(description, preview)
     _current_event["confirm_wait_s"] = round(time.time() - t0, 2)
@@ -359,11 +361,23 @@ def _reports_failures(func):
             return (f"STOP. {_refusals} moves in this command were already refused. Do not call any more "
                     "tools; tell the operator what was refused and why.")
         _current_event["after_s"] = round(time.time() - _command_time, 1)
+        _current_event["tool"] = func.__name__          # so the console can say which tool is running
         try:
             return func(*args, **kwargs)
         except RuntimeError as exc:
             return _record(func.__name__, kwargs, "failed", f"FAILED: {exc}")
     return wrapper
+
+
+def _line_label(name, args, target_cm):
+    """What the card and the spoken read-back call a straight move: "Up 5 cm" for move_by (the
+    largest axis of the offset names it), "x 36, y -4, z 34" for move_to."""
+    if name == "move_by":
+        dx, dy, dz = (float(args.get(k, 0)) for k in ("dx", "dy", "dz"))
+        axis, value = max((("z", dz), ("y", dy), ("x", dx)), key=lambda kv: abs(kv[1]))
+        word = {"z": ("Up", "Down"), "y": ("Left", "Right"), "x": ("Forward", "Back")}[axis][0 if value >= 0 else 1]
+        return f"{word} {abs(value):g} cm"
+    return f"x {target_cm[0]:g}, y {target_cm[1]:g}, z {target_cm[2]:g}"
 
 
 def _move_line(name, args, target_cm):
@@ -398,7 +412,10 @@ def _move_line(name, args, target_cm):
     description = (f"move the tool in a straight line from {start_cm} to {target_cm} cm "
                    f"({distance:.1f} cm, about {_seconds(trajectory):.0f} s)")
     print(f"[robot] {description}")
-    if not _confirm(description, trajectory, [start_cm, target_cm]):
+    facts = {"kind": "line", "label": _line_label(name, args, target_cm), "from_cm": start_cm,
+             "to_cm": [round(float(v), 1) for v in target_cm], "distance_cm": round(distance, 1),
+             "seconds": round(_seconds(trajectory), 1)}
+    if not _confirm(description, trajectory, [start_cm, target_cm], facts):
         return _record(name, args, "cancelled", "Cancelled by the operator. Nothing was moved.")
 
     completed = robot.execute(trajectory)
@@ -595,7 +612,9 @@ def _follow_points(name, args, points):
     description = (f"move the tool through {len(offsets)} points, {sum(legs):.1f} cm in total, "
                    f"from {start_cm} to {points_cm[-1]} cm (about {_seconds(trajectory):.0f} s){note}")
     print(f"[robot] {description}")
-    if not _confirm(description, trajectory, [start_cm] + points_cm):
+    facts = {"kind": "path", "label": f"Path of {len(offsets)} points", "from_cm": start_cm, "to_cm": points_cm[-1],
+             "distance_cm": round(sum(legs), 1), "seconds": round(_seconds(trajectory), 1)}
+    if not _confirm(description, trajectory, [start_cm] + points_cm, facts):
         return _record(name, args, "cancelled", "Cancelled by the operator. Nothing was moved.")
 
     completed = robot.execute(trajectory)
@@ -640,7 +659,9 @@ def move_joint(joint: int, degrees: float) -> str:
     description = (f"turn joint {joint} ({word}) by {degrees:+.1f} deg: {start:.1f} -> {target[name]:.1f} deg "
                    f"(about {_seconds(trajectory):.0f} s)")
     print(f"[robot] {description}")
-    if not _confirm(description, trajectory):
+    facts = {"kind": "joint", "label": f"Joint {joint} by {degrees:g}°", "largest_turn_deg": round(abs(degrees), 1),
+             "seconds": round(_seconds(trajectory), 1)}
+    if not _confirm(description, trajectory, None, facts):
         return _record("move_joint", args, "cancelled", "Cancelled by the operator. Nothing was moved.")
 
     completed = robot.execute(trajectory)
@@ -664,7 +685,10 @@ def go_home() -> str:
     trajectory = robot.plan_joints(config.HOME_DEG)
     description = f"go to the home pose (about {_seconds(trajectory):.0f} s)"
     print(f"[robot] {description}")
-    if not _confirm(description, trajectory):
+    turn = max(abs(config.HOME_DEG[n] - robot.joints_deg.get(n, config.HOME_DEG[n])) for n in config.HOME_DEG)
+    facts = {"kind": "joint", "label": "Home position", "largest_turn_deg": round(turn, 1),
+             "seconds": round(_seconds(trajectory), 1)}
+    if not _confirm(description, trajectory, None, facts):
         return _record("go_home", {}, "cancelled", "Cancelled by the operator. Nothing was moved.")
     if not robot.execute(trajectory):
         return _record("go_home", {}, "stopped", "Stopped part-way by the operator. The arm is NOT at its home pose.")

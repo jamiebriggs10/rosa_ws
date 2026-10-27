@@ -109,8 +109,10 @@ def _gate(tool_name, args, name, what):
         return robot_tools._record(tool_name, args, "refused", f"REFUSED: {reason}")
     if verdict == "confirm":
         print(f"[robot] {what}")
+        entry = description().get(name) or {}
+        label = (entry.get("means") or name).split(". ")[0].rstrip(".")
         t0 = time.time()
-        ok = robot_tools._confirm_handler(what, None)
+        ok = robot_tools._confirm_handler(what, {"facts": {"kind": "trigger", "label": label, "name": name}})
         robot_tools._current_event["confirm_wait_s"] = round(time.time() - t0, 2)
         if not ok:
             return robot_tools._record(tool_name, args, "cancelled", "Cancelled by the operator. Nothing was done.")
