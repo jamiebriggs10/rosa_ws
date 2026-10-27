@@ -62,6 +62,21 @@ def says_no(text):
     return normalise(text) in NO_WORDS
 
 
+WAKE_WORDS = ("rosa", "hey rosa")      # always stripped; the voice app's own wake word is added from its settings
+
+
+def strip_wake(text, words=WAKE_WORDS):
+    """The utterance without a leading wake word ("Truffles, confirm" -> "confirm"), normalised.
+    A wake word in the middle of a sentence is left alone."""
+    out = normalise(text)
+    for word in sorted((normalise(w) for w in words if w), key=len, reverse=True):
+        if out == word:
+            return ""
+        if out.startswith(word + " "):
+            return out[len(word) + 1:].strip()
+    return out
+
+
 def split_no(text):
     """For an utterance that starts with a no-word, the rest of it: "" for a bare "no",
     "point eleven" for "no, point eleven" (a one-step correction). None if it does not start
@@ -91,9 +106,10 @@ def _json(response):
 
 
 class VoiceLink:
-    def __init__(self, url=None, on_final=None, on_partial=None, on_idle=None, on_timings=None):
+    def __init__(self, url=None, on_final=None, on_partial=None, on_idle=None, on_timings=None, on_state=None):
         self._url = url or (lambda: config.VOICE_URL)      # a function, so a changed setting is picked up
         self.on_final, self.on_partial, self.on_idle, self.on_timings = on_final, on_partial, on_idle, on_timings
+        self.on_state = on_state
         self.latest = _fresh()
         self._sock = None                                   # the open stream's socket, so reconnect() can cut it
         self._lock = threading.Lock()
@@ -214,6 +230,10 @@ class VoiceLink:
                 if key in status:
                     self.latest[key] = status[key]
             self.request("POST", "/wake", {"on": config.VOICE_ON})
+            _, settings = self.request("GET", "/settings")
+            model = str(((settings.get("trigger") or {}).get("openwakeword") or {}).get("model") or "")
+            name = model.rsplit("/", 1)[-1].split(".", 1)[0].replace("_", " ").strip()   # models/truffles.onnx -> truffles
+            self.latest["wake_word"] = name or None
         except VoiceUnavailable:
             pass                               # the stream itself is open; the next sync will catch up
 
@@ -251,6 +271,8 @@ class VoiceLink:
             if latest["state"] == "idle":
                 latest["partial"] = ""
                 self._call(self.on_idle)
+            elif latest["state"] in ("armed", "listening"):
+                self._call(self.on_state, latest["state"])
         elif kind == "level":
             latest["level"] = data.get("rms")
         elif kind == "partial":

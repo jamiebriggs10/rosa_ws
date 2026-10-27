@@ -47,6 +47,8 @@ class FakeVoiceApp:
                 elif self.path == "/status":
                     self.reply(200, {"state": "idle", "wake_on": True, "device": "cpu",
                                      "summary": "ptt + silero + ptt_release + parakeet/batch"})
+                elif self.path == "/settings" and getattr(app, "settings", None) is not None:
+                    self.reply(200, app.settings)
                 else:
                     self.reply(404, {"error": "no such page"})
 
@@ -262,3 +264,17 @@ def test_speaking_and_followup_events_fill_latest_and_timings_call_back(fake, mo
     link = voice.VoiceLink(url=lambda: app.url, on_timings=felt.append)
     link.listen_once()
     assert link.latest["speaking"] is False and link.latest["followup_s"] == 7.5 and felt == [333]
+
+
+@pytest.mark.parametrize("text,out", [("Truffles, confirm", "confirm"), ("rosa confirm", "confirm"), ("hey rosa, no point eleven", "no point eleven"),
+                                      ("confirm", "confirm"), ("truffles", ""), ("the truffles are nice", "the truffles are nice")])
+def test_a_leading_wake_word_is_stripped(text, out):
+    assert voice.strip_wake(text, ("truffles", "rosa", "hey rosa")) == out
+
+
+def test_sync_reads_the_wake_word_from_the_voice_apps_settings(fake):
+    app = fake([])
+    app.settings = {"trigger": {"use": "openwakeword", "openwakeword": {"model": "models/truffles.onnx"}}}
+    link = voice.VoiceLink(url=lambda: app.url)
+    link.listen_once()
+    assert link.latest["wake_word"] == "truffles"

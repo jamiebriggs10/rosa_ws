@@ -99,6 +99,7 @@ class Console:
         self._felt_ms = None                  # the voice app's felt delay for the spoken command running now
         self._tour_id = 0                     # a new question or command interrupts a running tour
         self._last_event = None               # the last tool event, for "where did that go"
+        self._stop_said = False               # stop() has already announced this stop
         self._later = None                    # the timer that returns a finished phase to idle
         robot_tools.set_confirm_handler(self.ask_operator)
 
@@ -198,6 +199,7 @@ class Console:
             self._answer = ok
             self.set_phase("moving" if ok else "cancelled")
             self._announce("moving" if ok else "cancelled")
+            voice_link.followup(0)            # answered (by a tap or a word): the card's window closes
             if not ok:
                 self.declined_run = True
             self._answered.set()
@@ -328,6 +330,8 @@ class Console:
                 return False
             self.busy, self.busy_since = True, time.time()
         self._phases, self.declined_run, self.follow_until, self.lit, self.timed_out = [], False, 0.0, [], None
+        self._tour_id += 1                    # a tour still talking stops here
+        voice_link.followup(0)                # and the voice app's follow-up window, if one was open, closes
         self.set_phase("thinking")
         self._announce("thinking")
         message = {"who": "you", "text": shown_text}
@@ -401,6 +405,9 @@ class Console:
         last = events[-1] if events else None
         if end == "cancelled":
             return                            # already announced when the card was answered or timed out
+        if end == "stopped" and self._stop_said:
+            self._stop_said = False
+            return                            # the stop button or the spoken stop already said it
         if end == "refused":
             self._announce("refused", reason=(last or {}).get("message", "Refused."))
         elif end == "stopped":
@@ -563,8 +570,10 @@ class Console:
     def stop(self, note=None):
         """The red button: cancel a pending card and the motion, bypassing the model.
         `note` is put in front of the message when something other than the button asked."""
-        if self.pending:
-            self.answer(self.pending["id"], False)
+        if self.pending:                      # a card still showing is declined quietly: the stop is the news
+            self._answer, self.declined_run = False, True
+            self._answered.set()
+            voice_link.followup(0)
         message = robot_tools.stop.invoke({})
         self.set_phase("stopped")
         tool = (_cached_status() or {}).get("tool_cm")
@@ -572,6 +581,7 @@ class Console:
             self._announce("stopped", x=round(tool[0]), y=round(tool[1]), z=round(tool[2]))
         else:
             self._announce("stopped", kind="result", text="Stopped.")
+        self._stop_said = self.busy           # the command's own ending must not say it again
         if not self.busy:
             self._rest(3)
         self.messages.append({"who": "robot", "text": f"{note} {message}" if note else message, "events": [], "total_s": 0})
@@ -584,7 +594,7 @@ class Console:
         swallowed, confirmed, cancelled, sent or busy. Only "stop" bypasses the model; every
         other command goes the way typed text goes, through submit() and the tools' checks.
         `partial` is live text while the person is still speaking: watched for "stop" only."""
-        text = (text or "").strip()
+        text = voice.strip_wake(text, self._wake_words())      # "Truffles, confirm" is a confirm
         if not config.VOICE_ON:
             return "off"
         if not text:
@@ -626,6 +636,16 @@ class Console:
             note = f"Heard “{text}” but the model is still busy. Say it again when it has finished."
         self.messages.append({"who": "robot", "text": note, "events": [], "total_s": 0})
         return "busy"
+
+    def _wake_words(self):
+        return voice.WAKE_WORDS + ((voice_link.latest.get("wake_word"),) if voice_link.latest.get("wake_word") else ())
+
+    def voice_state(self, state):
+        """The voice app is armed or listening: the lamp and the listen tone, once per utterance.
+        (Batch speech-to-text sends no partial text, so this is where listening comes from.)"""
+        if state in ("armed", "listening") and not self.busy and self.phase != "listening":
+            self.set_phase("listening")
+            self._announce("listening")
 
     def voice_idle(self):
         """The voice app is back to idle: the next utterance may stop the arm again."""
@@ -815,6 +835,7 @@ console = None   # set in main() or by the tests
 # The link to the voice app (voice.py). Its callbacks run on the link's own thread and look
 # `console` up when called, because the tests replace it.
 voice_link = voice.VoiceLink(on_final=lambda text: console.heard(text), on_timings=lambda ms: console.voice_timings(ms),
+                             on_state=lambda state: console.voice_state(state),
                              on_partial=lambda text: console.heard(text, partial=True),
                              on_idle=lambda: console.voice_idle())
 

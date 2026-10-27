@@ -17,7 +17,7 @@ OPTIONAL = {"view-sethome", "view-cell", "saved-count", "saved-list", "voice-lam
             "voice-settings", "robot-widget", "robot-lamp", "robot-text", "tools", "think-time", "cancel",
             "hint", "pendant", "help", "settings-panel", "summary", "limits-edit", "limits-form", "limits-chips",
             "s-ollama", "s-moveit", "s-joint_states", "jointlist", "scroll", "messages", "gate", "thinking",
-            "robot-mode-sim", "robot-mode-real", "robot-recheck", "robot-dialog", "voice-dialog"}
+            "robot-mode-sim", "robot-mode-real", "robot-recheck", "robot-dialog", "voice-dialog", "settings"}
 ASKED = re.compile(r'(?:\$|getElementById)\(\s*"([\w-]+)"\s*\)')
 QUERY = re.compile(r'querySelector(?:All)?\(\s*["\']#([\w-]+)')
 DEFINED = re.compile(r'id="([\w-]+)"')

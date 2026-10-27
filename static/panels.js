@@ -153,7 +153,8 @@ function showVoice(v) {
   const [lamp, text] = voiceLampText(v);
   if ($("voice-lamp")) { $("voice-lamp").className = "lamp " + lamp; $("voice-text").textContent = text; }
   if (!voiceUrlFilled && v.url && $("voice-url")) { $("voice-url").value = v.url; voiceUrlFilled = true; }
-  if (!$("voice-dialog") || !$("voice-dialog").open) return;
+  const dlg = $("voice-dialog") || $("settings");         // the workbench's pop-up, or the stage's settings
+  if (!dlg || !dlg.open) return;
   const key = JSON.stringify([v, voiceMessage]);
   if (key === voiceKey) return;
   voiceKey = key;

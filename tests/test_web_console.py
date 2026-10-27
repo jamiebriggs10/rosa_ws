@@ -911,8 +911,8 @@ def test_stage_page_is_served(client):
 
 
 def test_voice_output_settings_route_validates(client, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_VERBOSITY", 1)
-    monkeypatch.setattr(web_console.config, "VOICE_PERSONA", "A")
+    for name in ("VOICE_VERBOSITY", "VOICE_PERSONA", "FOLLOW_UP_S", "CONFIRM_TIMEOUT_S", "MAP_ROS"):
+        monkeypatch.setattr(web_console.config, name, getattr(web_console.config, name))   # restored after the test
     r = client.post("/settings/voice", json={"voice_verbosity": 2, "voice_persona": "B", "follow_up_s": 5, "confirm_timeout_s": 30, "map_ros": True})
     assert r.status_code == 200 and r.get_json()["verbosity"] == 2 and web_console.config.VOICE_PERSONA == "B"
     assert client.post("/settings/voice", json={"voice_verbosity": 7}).status_code == 400
@@ -920,3 +920,70 @@ def test_voice_output_settings_route_validates(client, monkeypatch):
     assert client.post("/settings/voice", json={"ollama_url": "http://x"}).status_code == 400     # not one of these settings
     s = client.get("/state").get_json()
     assert s["verbosity"] == 2 and s["persona"] == "B" and s["follow_up_s"] == 5 and s["confirm_timeout_s"] == 30 and s["map_ros"] is True
+
+
+# ---- the review's fix pass ----
+
+def test_stop_is_announced_once(client, recorder, monkeypatch):
+    c = web_console.console
+    monkeypatch.setattr(web_console.robot_tools, "stop", FakeStop())
+
+    def invoke(text):
+        ok = c.ask_operator("a card", {"facts": {"kind": "line", "label": "Point 10", "distance_cm": 5, "seconds": 2}})
+        robot_tools.events.append({"tool": "move_to", "args": {}, "outcome": "stopped", "message": "Stopped part-way by the operator. The tool is at [1, 2, 3] cm."})
+        return "stopped"
+    client.agent.invoke = invoke
+    client.post("/command", json={"text": "go to point ten"})
+    wait_until(lambda: c.pending)
+    client.post("/stop")
+    wait_until(lambda: not c.busy)
+    stops = [t for t in recorder.say_calls if t.startswith("Stopped")]
+    assert len(stops) == 1 and recorder.play_calls.count("cancel") == 1
+
+
+def test_a_tap_confirm_closes_the_voice_apps_window(client, recorder):
+    c = web_console.console
+    line_agent(client, {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6})
+    client.post("/command", json={"text": "go to point ten"})
+    wait_until(lambda: c.pending)
+    assert recorder.followup_calls[-1] == 20
+    client.post("/confirm", json={"id": c.pending["id"], "ok": True})
+    assert recorder.followup_calls[-1] == 0                  # the voice app stops listening without the wake word
+    wait_until(lambda: not c.busy)
+    client.agent.invoke = lambda text: "echo"
+    recorder.followup_calls.clear()
+    client.post("/command", json={"text": "hello"})
+    assert recorder.followup_calls and recorder.followup_calls[0] == 0
+
+
+def test_a_command_interrupts_a_tour(client, caps, recorder):
+    c = web_console.console
+    client.post("/command", json={"text": "what can I do with multiview_scan"})
+    wait_until(lambda: c.lit, timeout=5)
+    before = len(c.messages)
+    client.post("/command", json={"text": "hello"})
+    wait_until(lambda: not c.busy)
+    time.sleep(2.5)                                            # the tour's tail would have run by now
+    assert c.lit == [] and c.follow_until == 0 or c.phase != "follow"
+    tails = [m for m in c.messages[before:] if m["who"] == "robot" and m["text"].startswith("Multiview scan offers")]
+    assert tails == []
+
+
+def test_the_voice_apps_listening_state_sets_the_phase(client, voice_on, recorder):
+    c = web_console.console
+    c.voice_state("armed")
+    assert c.phase == "listening" and recorder.play_calls[-1] == "listen"
+    c.voice_state("listening")
+    assert recorder.play_calls.count("listen") == 1            # once per utterance
+    c.voice_idle()
+    assert c.phase == "idle"
+
+
+def test_a_leading_wake_word_does_not_spoil_a_confirm(client, confirm_on, recorder):
+    c = web_console.console
+    web_console.voice_link.latest["wake_word"] = "truffles"
+    line_agent(client, {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6})
+    c.heard("go to point ten")
+    wait_until(lambda: c.pending)
+    assert c.heard("Truffles, confirm") == "confirmed"
+    wait_until(lambda: not c.busy)
