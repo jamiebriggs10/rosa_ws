@@ -93,6 +93,8 @@ class Console:
         self.declined_run = False             # the operator said no once in this run: no more cards for it
         self.lit = []                         # map nodes a spoken tour is pointing at right now
         self.said = ""                        # the last line Rosa was asked to say
+        self.timed_out = None                 # the label of a card nobody answered, for the spoken line
+        self._last_label = None               # what the last card proposed, for the held correction's context
         self._later = None                    # the timer that returns a finished phase to idle
         robot_tools.set_confirm_handler(self.ask_operator)
 
@@ -120,13 +122,18 @@ class Console:
     def ask_operator(self, description, preview=None):
         """Called from the agent thread by a tool. Blocks until the page answers, or the card
         times out (config.CONFIRM_TIMEOUT_S), which counts as no."""
+        facts = (preview or {}).get("facts") if isinstance(preview, dict) else None
+        self._last_label = (facts or {}).get("label") or description[:40]
+        if self.declined_run:                 # one "no" covers the whole run: no second card for the same command
+            return False
         self._answered.clear()
-        self.pending = {"id": str(time.time()), "text": description, "preview": preview,
-                        "facts": (preview or {}).get("facts") if isinstance(preview, dict) else None}
+        self.pending = {"id": str(time.time()), "text": description, "preview": preview, "facts": facts}
         self.set_phase("proposing")
         answered = self._answered.wait(timeout=config.CONFIRM_TIMEOUT_S)
         self.pending = None
         if not answered:
+            self.timed_out = self._last_label
+            self.declined_run = True
             self.set_phase("cancelled")
         return bool(answered and self._answer)
 
@@ -141,10 +148,11 @@ class Console:
         return False
 
     # -- commands ------------------------------------------------------------
-    def submit(self, text, via=None):
+    def submit(self, text, via=None, shown=None):
         """Start a command for the model. Returns False if one is already running.
-        `via` says where the words came from ("voice"); typed text has none."""
-        return self._start(text, self._ask_model, text, via)
+        `via` says where the words came from ("voice"); typed text has none. `shown` is what
+        the chat and the session table show when it differs from what the model is sent."""
+        return self._start(shown if shown is not None else text, self._ask_model, text, via)
 
     def rerun(self, label, tool, args):
         """Run a move again straight through its tool: no model, but every safety check."""
@@ -155,7 +163,7 @@ class Console:
             if self.busy:
                 return False
             self.busy, self.busy_since = True, time.time()
-        self._phases, self.declined_run, self.follow_until, self.lit = [], False, 0.0, []
+        self._phases, self.declined_run, self.follow_until, self.lit, self.timed_out = [], False, 0.0, [], None
         self.set_phase("thinking")
         message = {"who": "you", "text": shown_text}
         if via:
@@ -199,6 +207,12 @@ class Console:
         self._current = None
         self.busy = False
         self._rest()
+        if self.held:
+            # A correction said over a card ("no, point eleven"): now that the model has finished
+            # with the declined move, the rest runs as its own command, with one line of context.
+            text, self.held = self.held, None
+            label = self._last_label or "that"
+            self.submit(f'(The operator declined "{label}" and said instead:) {text}', via=via, shown=text)
 
     def _remember_moves(self, events, by_model):
         """Add an exact record of what was done (tools, numbers or formulas, outcomes, positions)
@@ -392,8 +406,12 @@ class Console:
         if pending and config.VOICE_CONFIRM:
             if voice.says_yes(text) and self.answer(pending["id"], True):
                 return "confirmed"
-            if voice.says_no(text) and self.answer(pending["id"], False):
-                return "cancelled"
+            rest = voice.split_no(text)
+            if rest is None:
+                rest = text                   # anything that is not a yes cancels the card and is a new command
+            if self.answer(pending["id"], False):
+                self.held = rest or None
+                return "held" if rest else "cancelled"
         if self.submit(text, via="voice"):
             return "sent"
         if self.pending:

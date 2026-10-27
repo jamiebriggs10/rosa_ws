@@ -110,11 +110,19 @@ def test_is_stop(text, stop):
     assert voice.is_stop(text) is stop
 
 
-def test_yes_and_no_are_whole_utterances():
-    assert voice.says_yes("Yes.") and voice.says_yes("go ahead") and voice.says_yes("Okay")
-    assert not voice.says_yes("yes, move it")
+def test_only_confirm_and_go_ahead_are_yes():
+    assert voice.says_yes("Confirm.") and voice.says_yes("go ahead")
+    assert not voice.says_yes("yes") and not voice.says_yes("okay") and not voice.says_yes("confirm it now")
     assert voice.says_no("Cancel") and voice.says_no("no.")
     assert not voice.says_no("cancel the second move")
+
+
+@pytest.mark.parametrize("text,rest", [("no", ""), ("No, point eleven", "point eleven"), ("cancel", ""),
+                                       ("no actually go home", "go home"), ("nope, rather up five", "up five"),
+                                       ("No. Instead, point twelve.", "point twelve"),
+                                       ("point eleven", None), ("nothing here", None), ("", None)])
+def test_split_no(text, rest):
+    assert voice.split_no(text) == rest
 
 
 # -- the stream -----------------------------------------------------------------------

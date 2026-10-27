@@ -438,7 +438,14 @@ def test_voice_confirm_answers_the_card_only_when_enabled(client, voice_on, monk
     assert c.heard("yes") == "busy"                       # voice confirm is off: the card waits for a click
     assert "confirm card" in c.messages[-1]["text"]
     monkeypatch.setattr(web_console.config, "VOICE_CONFIRM", True)
-    assert c.heard("Yes.") == "confirmed"
+    assert c.heard("Yes.") == "held"                      # not a yes-word any more: cancels the card, runs as a command
+    wait_until(lambda: outcome.get("confirmed") is False)
+    wait_until(lambda: len(c.records) == 1 and c.pending, timeout=10)    # the held "Yes." ran as its own command
+    c.answer(c.pending["id"], False)
+    wait_until(lambda: len(c.records) == 2 and not c.busy, timeout=10)
+    client.post("/command", json={"text": "move up 5 cm"})
+    wait_until(lambda: c.pending is not None)
+    assert c.heard("Confirm.") == "confirmed"
     wait_until(lambda: not c.busy)
     assert outcome["confirmed"] is True
     client.post("/command", json={"text": "move up 5 cm"})
@@ -613,3 +620,110 @@ def test_finish_has_the_timing_columns(client, tmp_path):
     r = client.post("/finish").get_json()
     text = open(r["path"]).read()
     assert "| Felt | Think | To confirm | Motion |" in text
+
+
+# ---- strict confirm, held corrections, the card's timeout ----
+
+def card_agent(client, label="Point 10"):
+    """An agent whose every call raises one confirm card with facts; records what the console sent it."""
+    seen = []
+
+    def invoke(text):
+        seen.append(text)
+        ok = web_console.console.ask_operator(f"move the tool in a straight line to {label}",
+                                              {"facts": {"label": label, "kind": "line"}})
+        return "moved" if ok else "cancelled"
+    client.agent.invoke = invoke
+    return seen
+
+
+@pytest.fixture
+def confirm_on(voice_on, monkeypatch):
+    monkeypatch.setattr(web_console.config, "VOICE_CONFIRM", True)
+    return voice_on
+
+
+def test_no_without_a_card_is_a_command(client, confirm_on):
+    assert web_console.console.heard("no") == "sent"
+    wait_until(lambda: not web_console.console.busy)
+    assert web_console.console.records[-1]["command"] == "no"
+
+
+def test_no_plus_rest_cancels_and_runs_the_rest_with_context(client, confirm_on):
+    c = web_console.console
+    seen = card_agent(client)
+    assert c.heard("go to point ten") == "sent"
+    wait_until(lambda: c.pending)
+    assert c.heard("no, point eleven") == "held"
+    assert c.held == "point eleven"
+    wait_until(lambda: len(seen) == 2 and c.pending, timeout=10)         # the held text is its own command
+    assert seen[1] == '(The operator declined "Point 10" and said instead:) point eleven'
+    assert len(c.records) == 1 and c.held is None
+    c.answer(c.pending["id"], False)
+    wait_until(lambda: len(c.records) == 2 and not c.busy, timeout=10)
+    assert c.records[1]["command"] == "point eleven" and c.records[1]["via"] == "voice"
+
+
+def test_second_card_after_no_is_declined_and_held_text_runs(client, confirm_on):
+    c = web_console.console
+    asked = []
+
+    def invoke(text):
+        asked.append(web_console.console.ask_operator("first card", {"facts": {"label": "Point 10"}}))
+        if len(asked) == 1:
+            asked.append(web_console.console.ask_operator("second card", {"facts": {"label": "Point 10"}}))
+        return "done"
+    client.agent.invoke = invoke
+    c.heard("go to point ten")
+    wait_until(lambda: c.pending)
+    t0 = time.time()
+    assert c.heard("no, point eleven") == "held"
+    wait_until(lambda: len(asked) == 2 and c.pending, timeout=10)         # the held text's own card
+    assert asked == [False, False] and time.time() - t0 < 5               # the second card never waited
+    c.answer(c.pending["id"], False)
+    wait_until(lambda: len(c.records) == 2 and not c.busy, timeout=10)
+    assert c.records[1]["command"] == "point eleven"
+
+
+def test_any_other_utterance_cancels_the_card_and_runs(client, confirm_on):
+    c = web_console.console
+    seen = card_agent(client)
+    c.heard("go to point ten")
+    wait_until(lambda: c.pending)
+    assert c.heard("what is point ten") == "held"
+    wait_until(lambda: len(seen) == 2 and c.pending, timeout=10)
+    c.answer(c.pending["id"], False)
+    wait_until(lambda: len(c.records) == 2 and not c.busy, timeout=10)
+    assert c.records[1]["command"] == "what is point ten"
+
+
+def test_card_timeout_is_cancelled_and_frees_the_console(client, confirm_on, monkeypatch):
+    monkeypatch.setattr(web_console.config, "CONFIRM_TIMEOUT_S", 0.2)
+    c = web_console.console
+    card_agent(client)
+    client.post("/command", json={"text": "go to point ten"})
+    wait_until(lambda: c.pending)
+    wait_until(lambda: not c.busy, timeout=5)
+    assert c.pending is None and [p[0] for p in c.records[-1]["phases"]][:3] == ["thinking", "proposing", "cancelled"]
+    assert c.timed_out == "Point 10"
+    assert client.post("/command", json={"text": "hello"}).status_code == 200
+
+
+def test_voice_confirm_default_is_on():
+    assert web_console.config.VOICE_CONFIRM is True
+
+
+def test_one_no_covers_the_run_with_a_click_too(client, voice_on):
+    c = web_console.console
+    asked = []
+
+    def invoke(text):
+        asked.append(c.ask_operator("first", {"facts": {"label": "A"}}))
+        asked.append(c.ask_operator("second", {"facts": {"label": "A"}}))
+        return "done"
+    client.agent.invoke = invoke
+    client.post("/command", json={"text": "two cards"})
+    wait_until(lambda: c.pending)
+    client.post("/confirm", json={"id": c.pending["id"], "ok": False})
+    wait_until(lambda: not c.busy, timeout=5)
+    assert asked == [False, False]

@@ -33,8 +33,10 @@ import urllib.request
 import config
 
 STOP_WORDS = frozenset({"stop", "halt", "freeze"})
-YES_WORDS = frozenset({"yes", "confirm", "go", "go ahead", "do it", "ok", "okay"})
+# Only these move the robot. "yes", "okay" and "go" are too easy to mishear or to say in passing.
+YES_WORDS = frozenset({"confirm", "go ahead"})
 NO_WORDS = frozenset({"no", "cancel"})
+_NO_START = re.compile(r"^(no|nope|cancel)\b[,.]?\s*(?:(?:actually|rather|instead)\b[,.]?\s*)?")
 
 RETRY_S = 2.0             # how long to wait before trying the voice app again
 STREAM_TIMEOUT_S = 30.0   # the voice app writes a keep-alive every 15 s; silence this long means the line is dead
@@ -58,6 +60,17 @@ def says_yes(text):
 
 def says_no(text):
     return normalise(text) in NO_WORDS
+
+
+def split_no(text):
+    """For an utterance that starts with a no-word, the rest of it: "" for a bare "no",
+    "point eleven" for "no, point eleven" (a one-step correction). None if it does not start
+    with one, so "point eleven" alone is just a command."""
+    words = normalise(text)
+    m = _NO_START.match(words)
+    if not m:
+        return None
+    return words[m.end():].strip()
 
 
 class VoiceUnavailable(Exception):
