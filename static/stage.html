@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rosa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/panels.css">
+<style>
+  /* The stage: the hands-free page. Dark, big type, one panel for the loop on the left, the real 3D
+     view and the map on the right, what you would say at the bottom. Every setting of the workbench
+     is in the Settings pop-up, which is a light panel (the workbench's own colours) over the stage. */
+  :root {
+    --bg: #0f1420; --panel: #161c2c; --line: #28324a; --ink: #f2f4f8; --muted: #8e99ab;
+    --listen: #f5b400; --think: #7c83f5; --ask: #f49a62; --go: #4ade80; --no: #f87171; --idle: #4b5563;
+    --action: #8d9bf0; --ok: #6fcf97; --bad: #f28b82; --gate: #f49a62; --gate-bg: #3d2416; --you-bg: #22284a;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "IBM Plex Sans", system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
+  button, input, select { font: inherit; }
+  button { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--think); outline-offset: 1px; }
+  button.primary { background: var(--ask); color: #1a0d05; border-color: var(--ask); font-weight: 700; }
+  button.danger { background: #7f1d1d; border-color: #991b1b; font-weight: 700; }
+  button:disabled { opacity: .45; cursor: default; }
+  a { color: var(--action); }
+
+  .top { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); flex: none; }
+  .top .n { color: var(--ink); font-size: 13px; }
+  .top .sp { flex: 1; }
+  .chip { font-weight: 500; font-size: 11.5px; text-transform: none; letter-spacing: 0; padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); white-space: nowrap; }
+  .top button, .top a.btn { padding: 4px 10px; font-weight: 500; font-size: 12px; text-transform: none; letter-spacing: 0; text-decoration: none; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); }
+
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; padding: 18px 22px 12px; }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; overflow: auto; } }
+  .left { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .state { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 12.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); min-height: 16px; }
+  .state .lamp.phase { width: 14px; height: 14px; }
+  .heard { font-weight: 500; font-size: 17px; color: var(--muted); margin: 4px 0 0; min-height: 24px; }
+  .heard em { font-style: normal; color: var(--ink); }
+  .heard .cur { border-right: 2px solid var(--listen); padding-right: 2px; }
+  .big { font-weight: 700; font-size: clamp(26px, 3.4vw, 42px); line-height: 1.12; letter-spacing: -.02em; margin: 2px 0 0; min-height: 1.2em; text-wrap: balance; }
+  .says { font-size: 16px; margin: 0; min-height: 24px; }
+  .says:not(:empty)::before { content: "Rosa: "; color: var(--muted); font-weight: 500; }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 500 13px/1.3 "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); min-height: 18px; }
+  .facts b { color: var(--ink); font-weight: 500; }
+  .ask[hidden] { display: none !important; }
+  .ask { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 0; }
+  .ask svg { width: 48px; height: 48px; flex: none; }
+  .ask .say { font-weight: 600; font-size: 18px; }
+  .ask .or { font-size: 13px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+  .chips .k { width: 100%; font-weight: 600; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .chips button { font-weight: 500; font-size: 12.5px; padding: 7px 11px; border-radius: 999px; }
+
+  .right { min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1.1fr); gap: 12px; }
+  .world, .mapbox { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; position: relative; overflow: hidden; min-height: 180px; }
+  .world .k, .mapbox .k { position: absolute; top: 8px; left: 12px; font-weight: 600; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); z-index: 2; pointer-events: none; }
+  #scene { position: absolute; inset: 0; }
+  #scene canvas { display: block; width: 100% !important; height: 100% !important; }
+  .viewnote { position: absolute; left: 12px; right: 12px; bottom: 8px; font-size: 12.5px; color: var(--ask); pointer-events: none; }
+  .viewnote:empty { display: none; }
+  .viewtools { position: absolute; top: 6px; right: 8px; display: flex; gap: 6px; z-index: 2; }
+  .viewtools button { font-size: 11.5px; padding: 3px 8px; background: rgba(22,28,44,.9); }
+  #map { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #map text { font-weight: 600; font-size: 11.5px; fill: var(--ink); pointer-events: none; }
+  #map text.s { font: 500 10px "IBM Plex Mono", ui-monospace, monospace; fill: var(--muted); }
+  #map text.hub { fill: #0f1420; font-size: 12px; }
+  #map line { stroke: var(--line); stroke-width: 1.4; }
+  #map line.lit { stroke: var(--ask); stroke-width: 2.6; }
+  #map circle.group { fill: #1c2440; stroke: #5b6fb8; stroke-width: 1.6; cursor: pointer; }
+  #map circle.offer { fill: var(--panel); stroke: var(--muted); stroke-width: 1.2; cursor: pointer; }
+  #map circle.moves { stroke: var(--ask); }
+  #map circle.off { stroke-dasharray: 3 3; opacity: .5; }
+  #map circle.collapsed { stroke-dasharray: 2 3; cursor: default; }
+  #map circle.lit { stroke: var(--ask); stroke-width: 3; fill: #3a2416; }
+  #map rect.hub { fill: #e6e9f8; }
+
+  footer { flex: none; border-top: 1px solid var(--line); padding: 10px 22px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  footer input { flex: 1 1 260px; min-width: 0; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
+
+  /* The settings pop-up: the workbench's panels, in the workbench's colours, over the stage */
+  #settings { --bg: #e9edf1; --panel: #ffffff; --ink: #1b2430; --muted: #5d6b79; --line: #cfd6de; --action: #1d5fb3;
+    --ok: #1e7b4e; --bad: #b42318; --gate: #b25e00; --gate-bg: #fff4e5; --you-bg: #e3ebf7;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(94vw, 900px); max-height: 92vh; }
+  #settings::backdrop { background: rgba(0,0,0,.55); }
+  #settings .shead { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 3; }
+  #settings .shead h2 { font-size: 17px; margin: 0 auto 0 0; }
+  #settings .sbody { padding: 10px 20px 20px; display: grid; gap: 10px; }
+  #settings details.sect { border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; background: var(--panel); }
+  #settings details.sect > summary { cursor: pointer; font-weight: 600; }
+  #settings .mode { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  #settings .mode button { border: none; border-radius: 0; padding: 4px 10px; font-size: 13px; color: var(--muted); background: var(--panel); }
+  #settings .mode button.sel { background: var(--action); color: #fff; }
+  #settings button { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
+  #settings .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 8px 0; font-size: 14px; }
+  #settings .row label { display: flex; align-items: center; gap: 6px; }
+  #settings .row select, #settings .row input[type=number] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+  #settings .note { color: var(--muted); font-size: 13px; }
+  #settings .limits, #settings .tools { border: none; padding: 6px 0; }
+  #settings .caps { display: block; }
+  #settings #messages-note { font-size: 13px; color: var(--muted); }
+  #settings .robot-panel .head, #settings .voice-panel .head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 6px 0 8px; }
+  #settings .robot-panel .head h2, #settings .voice-panel .head h2 { font-size: 15px; margin: 0 auto 0 0; }
+  #settings .voice-panel .foot, #settings .robot-panel .foot { display: none; }
+  #summary { border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; max-width: 900px; width: 92vw; font: inherit; background: #fff; color: #1b2430; }
+  #summary table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0; }
+  #summary th, #summary td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #cfd6de; vertical-align: top; }
+  @media (prefers-reduced-motion: reduce) { .ring-spin { animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="top">
+  <span class="n">Rosa</span><span id="phase-label">· idle</span>
+  <span class="sp"></span>
+  <span class="chip" id="chip-robot">Robot · …</span>
+  <span class="chip" id="chip-model">Model · …</span>
+  <span class="chip" id="chip-voice">Voice · …</span>
+  <a class="btn" id="workbench-link" href="/" title="The full console: chat, saved moves, every panel on one page">Workbench</a>
+  <button id="open-settings" type="button" title="Model, safety limits, robot connection, voice, tools, what the system offers, session">Settings</button>
+</div>
+
+<main>
+  <section class="left" aria-live="polite">
+    <div class="state"><span class="lamp phase" id="lamp"></span><span id="state-text">Idle</span></div>
+    <p class="heard" id="heard"></p>
+    <p class="big" id="big">…</p>
+    <p class="says" id="says"></p>
+    <div class="facts" id="facts"></div>
+    <div class="ask" id="ask" hidden>
+      <svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="19" fill="none" stroke="#28324a" stroke-width="5"/><circle id="ring" cx="24" cy="24" r="19" fill="none" stroke="#f49a62" stroke-width="5" stroke-linecap="round" stroke-dasharray="119.4" stroke-dashoffset="0" transform="rotate(-90 24 24)"/></svg>
+      <div><div class="say" id="ask-say">Say "confirm" to move</div><div class="or" id="ask-or">"no" cancels · or say what you'd rather do</div></div>
+    </div>
+    <div class="chips" id="suggest"></div>
+  </section>
+  <aside class="right">
+    <div class="world"><span class="k">World</span><div id="scene"></div>
+      <div class="viewtools"><button id="view-home" type="button" title="Go back to the home view">⌂ Home</button></div>
+      <div class="viewnote" id="viewnote">Loading the robot model…</div></div>
+    <div class="mapbox"><span class="k" id="map-k">Map · what the connected nodes offer</span><svg id="map"></svg></div>
+  </aside>
+</main>
+
+<footer>
+  <form id="form" style="display:contents">
+    <input id="text" autocomplete="off" placeholder="Type what you would say (or say it, with the wake word)">
+    <button id="send" type="submit">Say it</button>
+  </form>
+  <button id="btn-confirm" class="primary" type="button" disabled>Confirm</button>
+  <button id="btn-no" type="button" disabled>No</button>
+  <button id="stop-robot" class="danger" type="button" title="Halt the arm now, without waiting for the model">Stop robot</button>
+</footer>
+
+<!-- Every setting of the workbench, in one pop-up. The fragments and ids are the workbench's, so panels.js draws them. -->
+<dialog id="settings">
+  <div class="shead"><h2>Settings</h2><button type="button" id="close-settings">Close</button></div>
+  <div class="sbody">
+    <details class="sect help" open>
+      <summary>Model</summary>
+      <div class="row"><label>Model <select id="model"><option>loading…</option></select></label>
+        <label title="Thinking models (like qwen3) can reason before answering: sometimes better, much slower"><input type="checkbox" id="think"> Let the model think</label></div>
+      <form id="ollama-form" class="row">
+        <label for="ollama-url">Ollama address</label>
+        <input id="ollama-url" placeholder="http://192.168.1.10:11434" autocomplete="off">
+        <button type="submit">Save and test</button>
+        <span id="ollama-note" class="note"></span>
+      </form>
+    </details>
+    <details class="sect" open>
+      <summary>Safety limits</summary>
+      <div class="limits" id="limits"><span id="limits-chips"></span><button id="limits-edit" type="button">Change</button><form id="limits-form" hidden></form></div>
+    </details>
+    <details class="sect robot-panel">
+      <summary>Robot connection</summary>
+      <div class="head">
+        <div class="mode" role="group" aria-label="Which robot">
+          <button type="button" id="robot-mode-sim" data-mode="sim">Simulator</button>
+          <button type="button" id="robot-mode-real" data-mode="real">Real robot</button>
+        </div>
+        <span class="pill" id="robot-overall">…</span>
+        <button type="button" id="robot-recheck">Check again</button>
+      </div>
+      <div class="alert" id="robot-alert"></div>
+      <ol id="robot-ladder"></ol>
+      <p class="note" id="robot-note"></p>
+    </details>
+    <details class="sect voice-panel">
+      <summary>Voice</summary>
+      <div class="head">
+        <div class="mode" role="group" aria-label="Voice on or off">
+          <button type="button" id="voice-on-btn">On</button>
+          <button type="button" id="voice-off-btn">Off</button>
+        </div>
+        <span class="pill" id="voice-state">…</span>
+      </div>
+      <div class="alert" id="voice-alert" hidden></div>
+      <div class="row"><label>Rosa says <select id="s-verbosity"><option value="0">sounds only</option><option value="1">read-backs and results</option><option value="2">everything (prefaces, cancels)</option></select></label>
+        <label>in the words of <select id="s-persona"><option value="A">A · the technician</option><option value="B">B · the colleague</option></select></label>
+        <label>voice <select id="s-speech-voice"><option value="">(voice app not running)</option></select></label>
+        <button type="button" id="s-test-voice">Say "This is Rosa"</button></div>
+      <div class="row"><label>No wake word needed for <input type="number" id="s-follow" min="0" max="30" step="1" style="width:60px"> s after Rosa speaks</label>
+        <label>A confirm card waits <input type="number" id="s-timeout" min="5" max="120" step="5" style="width:60px"> s</label></div>
+      <div class="live">
+        <div class="meter" title="Microphone level"><div id="voice-level"></div></div>
+        <div class="heard" id="voice-heard"><span class="empty-note">Nothing heard yet.</span></div>
+        <div class="row">
+          <button type="button" id="voice-ptt" disabled title="Hold while you speak; let go when you have finished">Hold to talk</button>
+          <span class="note" id="voice-felt"></span>
+          <span class="note" id="voice-action"></span>
+        </div>
+      </div>
+      <h3 class="sect">Voice app settings <span class="note" id="voice-saved"></span></h3>
+      <div id="voice-settings-body">
+        <div class="knob"><label for="voice-device">device</label><select id="voice-device"><option value="auto">auto</option><option value="cuda">cuda</option><option value="metal">metal</option><option value="cpu">cpu</option></select><div class="help">auto picks the best this computer has: cuda (NVIDIA), metal (Apple silicon), otherwise cpu</div></div>
+        <div id="voice-stages"></div>
+        <div class="row">
+          <label>Preset <select id="voice-preset"></select></label>
+          <button type="button" id="voice-preset-load">Load</button>
+          <input id="voice-preset-name" placeholder="new preset name" autocomplete="off">
+          <button type="button" id="voice-preset-save">Save as preset</button>
+        </div>
+      </div>
+      <h3 class="sect">Console side</h3>
+      <form id="voice-url-form" class="row">
+        <label for="voice-url">Voice app address</label>
+        <input id="voice-url" placeholder="http://127.0.0.1:8100" autocomplete="off">
+        <button type="submit">Test and save</button>
+        <span class="note" id="voice-url-note"></span>
+      </form>
+      <label class="row"><input type="checkbox" id="voice-confirm"> Let a spoken "confirm" answer the card <span class="note">(only "confirm" or "go ahead", as a whole utterance)</span></label>
+    </details>
+    <details class="sect">
+      <summary>Tools</summary>
+      <div class="tools" id="tools"><span id="tools-buttons"></span><a id="pendant" target="_blank" hidden>Open pendant</a></div>
+      <p class="note">Open on the robot's computer's own screen only.</p>
+    </details>
+    <details class="sect caps help">
+      <summary>What this system offers (<span id="caps-count">…</span>)</summary>
+      <p id="caps-system" class="note"></p>
+      <div id="caps-body">Loading…</div>
+      <div class="row"><button id="caps-rescan" type="button">Rescan</button>
+        <label><input type="checkbox" id="s-ros"> Show ROS names and the undescribed interfaces on the map</label></div>
+      <p class="note">Read from ROS on this computer, with the meanings in <span id="caps-file" class="mono"></span>. Items marked <b>moves robot</b> are confirmed on a card first.</p>
+    </details>
+    <details class="sect">
+      <summary>Session</summary>
+      <div class="row"><button id="reset" type="button" title="Make the model forget this conversation">New conversation</button>
+        <button id="finish" type="button">Finish session</button>
+        <span class="note">The chat and the saved moves are on the <a href="/">workbench</a>.</span></div>
+    </details>
+  </div>
+</dialog>
+<dialog id="summary"></dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="/static/panels.js"></script>
+<script src="/static/map.js"></script>
+<script type="importmap">
+{"imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "urdf-loader": "https://cdn.jsdelivr.net/npm/urdf-loader@0.12.1/src/URDFLoader.js"
+}}
+</script>
+<script type="module" src="/static/view.js"></script>
+<script>
+// The stage is drawn from /state four times a second and /capabilities every ten seconds. It holds
+// no state of its own beyond what it last drew; everything it shows the console already knows.
+try { localStorage.setItem("rosa-page", "stage"); } catch {}
+$("workbench-link").onclick = () => { try { localStorage.setItem("rosa-page", "workbench"); } catch {} };
+
+const PHASE_LAMP = {idle: "", listening: "listen", heard: "listen", thinking: "think", proposing: "ask", moving: "go",
+                    done: "go", refused: "no", cancelled: "no", stopped: "no", follow: "follow"};
+let caps = [], capsAt = 0, pendingId = null, pathKey = null, lastGroup = null, lastSuggest = "";
+
+function stateText(s) {
+  const t = {
+    idle: s.voice && s.voice.on ? "Idle · say the wake word" : "Idle · voice off, type below",
+    listening: "Listening", heard: "Heard", thinking: `Thinking · ${Math.floor(s.phase_since_s)} s`,
+    proposing: "Proposing · waiting for you", moving: 'Moving · "stop" halts the arm', done: "Done",
+    refused: "Refused", cancelled: "Cancelled", stopped: "Stopped",
+    follow: `Your turn · no wake word needed · ${Math.ceil(s.follow_until_s)} s`,
+  }[s.phase] || s.phase;
+  return s.held ? `${t} · changing to: "${s.held}"` : t;
+}
+const first = text => (String(text || "").split(/(?<=[.!?])\s/)[0] || "").slice(0, 90);
+const num = v => (v === undefined || v === null) ? "–" : Math.round(v);
+
+function factsChips(s) {
+  const p = s.pending, f = p && p.facts;
+  if (f) {
+    if (f.kind === "trigger") return [["service", f.name], ["moves the robot", "yes"]];
+    const out = [];
+    if (f.from_cm) out.push(["from", `x ${num(f.from_cm[0])} y ${num(f.from_cm[1])} z ${num(f.from_cm[2])}`]);
+    if (f.to_cm) out.push(["to", `x ${num(f.to_cm[0])} y ${num(f.to_cm[1])} z ${num(f.to_cm[2])}`]);
+    if (f.distance_cm !== undefined) out.push(["distance", `${f.distance_cm} cm`]);
+    if (f.largest_turn_deg !== undefined) out.push(["largest turn", `${f.largest_turn_deg}°`]);
+    out.push(["duration", `${f.seconds} s`], ["path", "clear"], ["speed", `${Math.round(s.speed * 100)} %`]);
+    return out;
+  }
+  const tool = s.status.tool_cm;
+  return [["tool", tool ? `x ${tool[0].toFixed(1)} y ${tool[1].toFixed(1)} z ${tool[2].toFixed(1)} cm` : "unknown"],
+          ["speed", `${Math.round(s.speed * 100)} %`], ["step limit", `${s.limits.MAX_STEP_CM} cm`]];
+}
+
+function render(s) {
+  $("lamp").className = "lamp phase " + (PHASE_LAMP[s.phase] || "");
+  $("phase-label").textContent = "· " + s.phase;
+  $("state-text").textContent = stateText(s);
+  const you = [...s.messages].reverse().find(m => m.who === "you");
+  if (s.voice && s.voice.partial) $("heard").innerHTML = `<em>${esc(s.voice.partial)}<span class="cur"></span></em>`;
+  else if (you) $("heard").innerHTML = `${you.via === "voice" ? "Heard" : "You"}: <em>"${esc(you.text)}"</em>`;
+  else $("heard").textContent = "";
+  const robot = [...s.messages].reverse().find(m => m.who === "robot");
+  const tool = s.status.tool_cm;
+  const litRow = s.lit && s.lit.length ? caps.find(r => r.name === s.lit[0] || r.node === s.lit[0]) : null;
+  if (s.pending) $("big").textContent = (s.pending.facts && s.pending.facts.label) || first(s.pending.text);
+  else if (litRow) $("big").textContent = "What " + RosaMap.groupName(litRow.node) + " offers";
+  else if (s.busy) $("big").textContent = "…";
+  else if (["done", "refused", "stopped", "cancelled", "follow"].includes(s.phase) && robot)
+    $("big").textContent = robot.events && robot.events.length ? first(robot.events[robot.events.length - 1].message) : first(robot.text);
+  else $("big").textContent = tool ? `Arm at x ${num(tool[0])}, y ${num(tool[1])}, z ${num(tool[2])}` : "Arm position unknown";
+  $("says").textContent = s.said || "";
+  $("facts").innerHTML = factsChips(s).map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join("");
+
+  // The confirm block, with the countdown ring from the card's age.
+  $("ask").hidden = !s.pending;
+  $("btn-confirm").disabled = $("btn-no").disabled = !s.pending;
+  if (s.pending) {
+    const left = Math.max(0, s.confirm_timeout_s - s.phase_since_s);
+    $("ring").setAttribute("stroke-dashoffset", String(119.4 * (1 - left / s.confirm_timeout_s)));
+    $("ask-or").textContent = `"no" cancels · or say what you'd rather do · ${Math.ceil(left)} s`;
+    if (s.pending.id !== pendingId) {
+      pendingId = s.pending.id;
+      const p = s.pending.preview;
+      if (p && p.path_deg && window.showRoute) { window.showRoute(p.joints, p.path_deg, p.points_cm); window.visualise(p.joints, p.path_deg, p.seconds); }
+    }
+  } else if (pendingId) { pendingId = null; if (window.hideGhost) window.hideGhost(); if (!s.busy && window.clearRoute) window.clearRoute(); }
+  if (!s.pending && !s.busy && window.clearRoute) window.clearRoute();
+
+  // The world: the live arm, and a path read from a topic with its points numbered.
+  if (window.showLive) window.showLive(s.status.joints);
+  const key = s.shown_path ? JSON.stringify(s.shown_path) : null;
+  if (key !== pathKey && window.showPath) {
+    pathKey = key;
+    if (key) { const pts = s.shown_path.points_cm; window.showPath(pts, s.shown_path.topic, pts.map((_, i) => String(i + 1))); window.lookAt(pts); }
+    else window.clearPath();
+  }
+
+  // The map, lit by the running tool and a tour.
+  const tool_name = s.trace && s.trace.tool;
+  const row = caps.find(r => r.name === tool_name) || (s.lit && s.lit.length ? caps.find(r => r.name === s.lit[0] || r.node === s.lit[0]) : null);
+  if (row) lastGroup = row.node;
+  RosaMap.update(caps, {showRos: !!s.map_ros, lit: s.lit || [], trace: s.trace});
+
+  // Chips: robot, model, voice; and what to try next.
+  $("chip-robot").textContent = s.robot && s.robot.overall ? `${s.robot.mode === "real" ? "Real robot" : "Simulator"} · ${s.robot.overall.text}` : "Robot · …";
+  $("chip-model").textContent = `Model · ${s.model}` + (s.status.ollama ? "" : " (unreachable)");
+  $("chip-voice").textContent = s.voice ? voiceLampText(s.voice)[1] : "Voice · …";
+  const group = lastGroup && caps.some(r => r.node === lastGroup && r.status !== "undescribed") ? lastGroup : null;
+  const described = caps.filter(r => r.status !== "undescribed");
+  const pool = group ? described.filter(r => r.node === group) : described;
+  const phrases = [...new Set(pool.map(r => r.say))].slice(0, 4).concat(["what can I do"]);
+  const sig = phrases.join("|");
+  if (sig !== lastSuggest) {
+    lastSuggest = sig;
+    $("suggest").innerHTML = `<span class="k">Try saying</span>` + phrases.map(p => `<button type="button">${esc(p)}</button>`).join("");
+    $("suggest").querySelectorAll("button").forEach(b => b.onclick = () => say(b.textContent));
+  }
+  // The stage's own settings, when the pop-up is open.
+  for (const [id, key] of [["s-verbosity", "verbosity"], ["s-persona", "persona"], ["s-follow", "follow_up_s"], ["s-timeout", "confirm_timeout_s"]])
+    if (document.activeElement !== $(id)) $(id).value = s[key];
+  if (document.activeElement !== $("s-ros")) $("s-ros").checked = !!s.map_ros;
+  panelsRefresh(s);
+}
+
+async function refresh() {
+  let s;
+  try { s = await (await fetch("/state")).json(); } catch { return; }
+  if (Date.now() - capsAt > 10000) {
+    capsAt = Date.now();
+    fetch("/capabilities").then(r => r.json()).then(d => { if (d.interfaces) caps = d.interfaces; }).catch(() => {});
+  }
+  render(s);
+}
+
+async function say(text) {
+  text = (text || "").trim();
+  if (!text) return;
+  const r = await post("/command", {text});
+  if (r.ok) { $("text").value = ""; refresh(); }
+}
+$("form").onsubmit = e => { e.preventDefault(); say($("text").value); };
+$("btn-confirm").onclick = () => { if (pendingId) post("/confirm", {id: pendingId, ok: true}).then(refresh); };
+$("btn-no").onclick = () => { if (pendingId) post("/confirm", {id: pendingId, ok: false}).then(refresh); };
+$("stop-robot").onclick = () => post("/stop").then(refresh);
+
+// The settings pop-up: the workbench's panels (panels.js) plus the stage's own four settings.
+$("open-settings").onclick = () => { $("settings").showModal(); loadVoiceSettings(); loadSpeechVoices(); };
+$("close-settings").onclick = () => $("settings").close();
+const stageSetting = (id, key, read) => { $(id).onchange = e => post("/settings/voice", {[key]: read(e.target)}).then(refresh); };
+stageSetting("s-verbosity", "voice_verbosity", el => Number(el.value));
+stageSetting("s-persona", "voice_persona", el => el.value);
+stageSetting("s-follow", "follow_up_s", el => Number(el.value));
+stageSetting("s-timeout", "confirm_timeout_s", el => Number(el.value));
+stageSetting("s-ros", "map_ros", el => el.checked);
+async function loadSpeechVoices() {
+  try {
+    const [o, s] = await Promise.all([vapi("options"), vapi("settings")]);
+    const current = (s.speech || {}).voice || "";
+    $("s-speech-voice").innerHTML = (o.voices || []).map(v => `<option value="${esc(v)}" ${v === current ? "selected" : ""}>${esc(v)}</option>`).join("") || `<option value="">(no voices in models/piper)</option>`;
+  } catch { $("s-speech-voice").innerHTML = `<option value="">(voice app not running)</option>`; }
+}
+$("s-speech-voice").onchange = e => { if (e.target.value) vapi("settings", "POST", {speech: {voice: e.target.value}}).catch(err => voiceProblem("Voice: " + err.message)); };
+$("s-test-voice").onclick = () => vapi("say", "POST", {text: "This is Rosa."}).catch(err => voiceProblem("Voice: " + err.message));
+RosaMap.mount($("map"), {onNode: id => say(`what can I do with ${RosaMap.groupName(id)}`), onOffer: row => say(row.say)});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("settings").open) post("/stop").then(refresh); });
+
+refresh(); setInterval(refresh, 250);
+</script>
+</body>
+</html>

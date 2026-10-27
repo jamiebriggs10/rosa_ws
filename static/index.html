@@ -6,6 +6,7 @@
 <title>Robot console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/panels.css">
 <style>
   :root {
     --bg: #e9edf1;
@@ -37,6 +38,7 @@
     padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center;
   }
   header h1 { font-size: 17px; font-weight: 600; margin: 0 auto 0 0; }
+  header h1 a { font-size: 13px; font-weight: 500; color: var(--action); margin-left: 10px; }
   header label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
   header select { font: inherit; color: var(--ink); padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
   .status { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
@@ -48,18 +50,6 @@
   .status a { color: var(--action); }
   .status span.hint { color: var(--gate); flex-basis: 100%; }
   .status span.hint::before { display: none; }
-  details.help form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
-  details.help form input { flex: 1 1 220px; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }
-  details.help form button, details.caps button { font: inherit; font-size: 13px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); cursor: pointer; }
-  details.help .note { color: var(--muted); font-size: 13px; }
-  details.caps table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
-  details.caps th, details.caps td { text-align: left; vertical-align: top; padding: 4px 6px; border-bottom: 1px solid var(--line); }
-  details.caps th { color: var(--muted); font-weight: 500; }
-  details.caps .st { font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--bg); white-space: nowrap; }
-  details.caps .st.ready { background: #def3e6; color: var(--ok); }
-  details.caps .st.missing { background: #fbe4e2; color: var(--bad); }
-  details.caps .moves { color: var(--gate); font-weight: 600; white-space: nowrap; }
-  details.caps .type { color: var(--muted); }
   header button { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 6px;
     border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
   header button:hover { border-color: var(--muted); }
@@ -107,22 +97,6 @@
   .scroll { flex: 1; overflow-y: auto; }
   main { padding: 16px; }
 
-  /* The safety limits, always on show under the header, and the row of tool buttons under them */
-  .limits, .tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 16px;
-    background: var(--panel); border-bottom: 1px solid var(--line); font-size: 13px; }
-  .limits .label, .tools .label { font-weight: 600; margin-right: 4px; }
-  .limits .chip { background: var(--bg); border-radius: 999px; padding: 2px 10px; }
-  .limits .chip b { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; }
-  .limits button, .tools button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
-    background: var(--panel); color: var(--ink); cursor: pointer; }
-  .tools[hidden] { display: none; }
-  .tools button.on { border-color: var(--ok); color: var(--ok); }     /* the tool is open or recording */
-  .tools a { color: var(--action); margin-left: 8px; }
-  .limits form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; flex-basis: 100%; padding-top: 6px; }
-  .limits form[hidden] { display: none; }
-  .limits form label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
-  .limits form input { width: 70px; font: inherit; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; }
-  .limits form .note { color: var(--muted); flex-basis: 100%; }
   .column { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
   .gate .preview { background: var(--panel); border-color: var(--gate); color: var(--gate); margin-left: 8px; }
 
@@ -135,13 +109,6 @@
     .xyz .val { font-size: 16px; }
   }
 
-  details.help { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
-  details.help summary { cursor: pointer; font-weight: 500; }
-  details.help ul { margin: 8px 0 4px; padding-left: 18px; }
-  details.help li { margin: 3px 0; }
-  details.help .cmd { color: var(--action); cursor: pointer; }
-  details.help .cmd:hover { text-decoration: underline; }
-
   #messages { display: flex; flex-direction: column; gap: 10px; }
   .msg { max-width: 85%; padding: 9px 13px; border-radius: 10px; white-space: pre-wrap; }
   .msg.you { align-self: flex-end; background: var(--you-bg); }
@@ -149,85 +116,7 @@
   .events { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: 13px; color: var(--muted); }
   .events .done { color: var(--ok); } .events .refused, .events .cancelled, .events .stopped, .events .no_motion, .events .failed { color: var(--bad); }
 
-  /* The robot-connection widget in the header, and the dialog it opens */
-  .robot-widget { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 13px; padding: 4px 10px;
-    border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink); cursor: pointer; }
-  .robot-widget:hover { border-color: var(--muted); }
-  .lamp { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #9aa5b1; flex: none; }
-  .lamp.ok { background: var(--ok); } .lamp.bad { background: var(--bad); } .lamp.gate { background: var(--gate); }
-  #robot-dialog { max-width: 760px; }
-  #robot-dialog .head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
-  #robot-dialog .head h2 { font-size: 17px; margin: 0 auto 0 0; }
-  #robot-dialog .mode { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  #robot-dialog .mode button { border: none; border-radius: 0; padding: 4px 10px; font-size: 13px; color: var(--muted); }
-  #robot-dialog .mode button.sel { background: var(--action); color: #fff; }
-  #robot-dialog .pill { font-size: 12px; border-radius: 999px; padding: 2px 9px; white-space: nowrap; font-weight: 500; background: #eef1f4; color: var(--muted); }
-  #robot-dialog .pill.ok { background: #def3e6; color: var(--ok); } #robot-dialog .pill.bad { background: #fbe4e2; color: var(--bad); }
-  #robot-dialog .pill.gate { background: var(--gate-bg); color: var(--gate); }
-  #robot-dialog .alert { padding: 8px 12px; border-radius: 6px; font-size: 14px; border: 1px solid var(--line); margin: 6px 0 10px; }
-  #robot-dialog .alert.ok { background: #def3e6; border-color: var(--ok); color: var(--ok); }
-  #robot-dialog .alert.bad { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
-  #robot-dialog .alert.gate { background: var(--gate-bg); border-color: var(--gate); color: var(--gate); }
-  #robot-dialog ol { list-style: none; margin: 0; padding: 0; }
-  #robot-dialog .step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 10px; align-items: start; padding: 8px 2px; border-bottom: 1px solid var(--line); }
-  #robot-dialog .step:last-child { border-bottom: none; }
-  #robot-dialog .step .lamp { margin-top: 7px; }
-  #robot-dialog .step .t { font-weight: 500; }
-  #robot-dialog .step .d { color: var(--muted); font-size: 13px; white-space: pre-line; }
-  #robot-dialog .step .act { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-  #robot-dialog .step .act button { font-size: 13px; padding: 4px 11px; }
-  #robot-dialog .step .act button.primary { border-color: var(--action); color: var(--action); }
-  #robot-dialog .step .act button:disabled { opacity: .45; cursor: default; }
-  #robot-dialog .step .you { font-size: 12px; color: var(--gate); font-weight: 500; white-space: nowrap; }
-  #robot-dialog .foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
-  #robot-dialog .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
-
-  /* Voice control: the header switch and gear, the pop-up, and the voice app's settings it draws */
-  .gear { width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; margin-left: -10px; }
-  .lamp.off { background: #9aa5b1; } .lamp.wait { background: var(--gate); } .lamp.busy { background: var(--action); }
-  #voice-dialog { max-width: 820px; max-height: 92vh; overflow: auto; }
-  #voice-dialog .head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
-  #voice-dialog .head h2 { font-size: 17px; margin: 0 auto 0 0; }
-  #voice-dialog .mode { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  #voice-dialog .mode button { border: none; border-radius: 0; padding: 4px 12px; font-size: 13px; color: var(--muted); }
-  #voice-dialog .mode button.sel { background: var(--action); color: #fff; }
-  #voice-dialog .pill { font-size: 12px; border-radius: 999px; padding: 2px 9px; white-space: nowrap; font-weight: 500; background: #eef1f4; color: var(--muted); }
-  #voice-dialog .pill.ok { background: #def3e6; color: var(--ok); } #voice-dialog .pill.wait { background: var(--gate-bg); color: var(--gate); }
-  #voice-dialog .pill.busy { background: var(--you-bg); color: var(--action); }
-  #voice-dialog .alert { padding: 8px 12px; border-radius: 6px; font-size: 14px; border: 1px solid var(--line); margin: 6px 0 10px; }
-  #voice-dialog .alert.bad { background: #fbe4e2; border-color: var(--bad); color: var(--bad); }
-  #voice-dialog .alert.wait { background: var(--gate-bg); border-color: var(--gate); color: var(--gate); }
-  #voice-dialog .live { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
-  .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
-  .meter div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
-  #voice-dialog .heard { min-height: 1.6em; margin: 8px 0; font-size: 16px; }
-  #voice-dialog .heard .partial { color: var(--muted); font-style: italic; }
-  #voice-dialog .heard .empty-note { color: var(--muted); font-size: 13px; }
-  #voice-dialog .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0; }
-  #voice-dialog .row input:not([type=checkbox]) { flex: 1 1 200px; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }
-  #voice-dialog .row select { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
-  #voice-ptt { padding: 10px 18px; font-weight: 500; user-select: none; touch-action: none; }
-  #voice-ptt.held { background: var(--gate); color: #fff; border-color: var(--gate); }
-  #voice-ptt:disabled { opacity: .5; cursor: default; }
-  #voice-dialog .sect { font-size: 15px; margin: 16px 0 6px; display: flex; gap: 10px; align-items: baseline; }
-  #voice-dialog .note { color: var(--muted); font-size: 12.5px; }
-  #voice-dialog .stage { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
-  #voice-dialog .stage h4 { margin: 0 0 6px; font-size: 14px; }
-  #voice-dialog .stage h4 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
-  #voice-dialog .badge { font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--gate-bg); color: var(--gate); margin-left: 8px; }
-  #voice-dialog .knob { display: grid; grid-template-columns: 170px 1fr; gap: 2px 10px; align-items: center; margin: 5px 0; font-size: 13.5px; }
-  #voice-dialog .knob label { color: var(--muted); }
-  #voice-dialog .knob input, #voice-dialog .knob select, #voice-dialog select.use { font: inherit; font-size: 13.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
-  #voice-dialog .knob input[type=checkbox] { justify-self: start; }
-  #voice-dialog .knob .help, #voice-dialog .knob details { grid-column: 1 / -1; }
-  #voice-dialog .knob .help { color: var(--muted); font-size: 12px; }
-  #voice-dialog details.explain { font-size: 12.5px; margin: 2px 0 4px; }
-  #voice-dialog details.explain summary { color: var(--action); cursor: pointer; }
-  #voice-dialog details.explain p { margin: 4px 0; }
-  #voice-dialog .foot { display: flex; justify-content: flex-end; margin-top: 12px; }
   .msg .via { font-size: 13px; }
-  @media (max-width: 560px) { #voice-dialog .knob { grid-template-columns: 1fr; } }
-
   .gate {
     align-self: stretch; background: var(--gate-bg); border: 2px solid var(--gate); border-radius: 10px; padding: 14px 16px;
   }
@@ -251,10 +140,6 @@
   .again button, #saved-list button { font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 6px;
     border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
   .again button:hover, #saved-list button:hover { border-color: var(--muted); }
-  #saved-list { list-style: none; padding: 0; margin: 8px 0 0; }
-  #saved-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 0; border-top: 1px solid var(--line); }
-  #saved-list li .what { flex: 1; min-width: 200px; }
-  #saved-list li .what span { color: var(--muted); font-size: 13px; }
   .empty { color: var(--muted); text-align: center; padding: 30px 0; }
 
   /* The bottom bar is always on screen, with the confirm card in it,
@@ -285,7 +170,7 @@
 </head>
 <body>
 <header>
-  <h1>Robot console</h1>
+  <h1>Robot console <a id="stage-link" href="/stage" title="The hands-free page: one big panel, sounds and speech, the map">Stage</a></h1>
   <label>Model <select id="model"><option>loading…</option></select></label>
   <label title="Thinking models (like qwen3) can reason before answering: sometimes better, much slower"><input type="checkbox" id="think"> Let the model think</label>
   <div class="status" id="status">
@@ -293,6 +178,7 @@
     <span id="s-moveit">MoveIt</span>
     <span id="s-joint_states">Joint states</span>
     <button class="robot-widget" id="robot-widget" type="button" title="How the robot is connected, and what to do next"><span class="lamp" id="robot-lamp"></span><span id="robot-text">Robot: checking…</span></button>
+    <span class="lamp phase" id="phase-lamp" title="What Rosa is doing: listening, thinking, proposing, moving"></span>
     <button class="robot-widget" id="voice-toggle" type="button" title="Turn voice control on or off"><span class="lamp off" id="voice-lamp"></span><span id="voice-text">Voice off</span></button><button class="gear" id="voice-settings" type="button" title="Voice: what the microphone hears, push-to-talk, and the voice settings">⚙</button>
     <span class="hint" id="hint" hidden></span>
   </div>
@@ -429,7 +315,7 @@
 
 <dialog id="summary"></dialog>
 <!-- The robot-connection panel: a ladder of checks for the simulator or the real robot, redrawn from /state. -->
-<dialog id="robot-dialog">
+<dialog id="robot-dialog" class="robot-panel">
   <div class="head">
     <h2>Robot connection</h2>
     <div class="mode" role="group" aria-label="Which robot">
@@ -448,7 +334,7 @@
 </dialog>
 <!-- Voice control: the switch, what the microphone hears, push-to-talk, and the voice app's settings.
      The settings are drawn when the dialog opens, fetched from the voice app through /voice/*. -->
-<dialog id="voice-dialog">
+<dialog id="voice-dialog" class="voice-panel">
   <div class="head">
     <h2>Voice control</h2>
     <div class="mode" role="group" aria-label="Voice on or off">
@@ -493,6 +379,11 @@
 <script src="/static/panels.js"></script>
 <script>
 let shown = 0, pendingId = null, helpAutoClosed = false, shownPathKey = null;
+// The stage remembers itself as the page to open; the workbench link on the stage clears that.
+try { if (localStorage.getItem("rosa-page") === "stage" && location.pathname === "/") location.replace("/stage"); } catch {}
+$("stage-link").onclick = () => { try { localStorage.setItem("rosa-page", "stage"); } catch {} };
+const PHASE_LAMP = {idle: "", listening: "listen", heard: "listen", thinking: "think", proposing: "ask", moving: "go",
+                    done: "go", refused: "no", cancelled: "no", stopped: "no", follow: "follow"};
 
 
 function renderMessage(m) {
@@ -588,6 +479,8 @@ async function refresh() {
   busyFrom = s.busy ? performance.now() - s.busy_for_s * 1000 : null;   // the timer ticks between polls
   $("send").disabled = s.busy;
   $("cancel").disabled = !s.busy;
+  $("phase-lamp").className = "lamp phase " + (PHASE_LAMP[s.phase] || "");
+  $("phase-lamp").title = "Rosa: " + s.phase + (s.held ? `, then "${s.held}"` : "");
   panelsRefresh(s);                          // the settings panels (panels.js)
 }
 

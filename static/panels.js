@@ -424,11 +424,12 @@ if ($("finish")) $("finish").onclick = async () => {
   const rows = r.records.map(x => {
     const calls = x.events.map(e => `${e.tool} ${Object.keys(e.args).length ? JSON.stringify(e.args) : ""} (${e.outcome})`).join("; ") || "none";
     const motion = x.events.filter(e => e.to_motion_s !== undefined).map(e => e.to_motion_s + " s").join(", ");
-    return `<tr><td>${x.time}</td><td>${esc(x.command)}</td><td>${esc(x.via || "typed")}</td><td class="mono">${esc(calls)}</td><td>${motion}</td><td>${x.total_s} s</td></tr>`;
+    const t = x.timings || {};
+    return `<tr><td>${x.time}</td><td>${esc(x.command)}</td><td>${esc(x.via || "typed")}</td><td>${t.felt || ""}</td><td>${t.think || ""}</td><td>${t.to_confirm || ""}</td><td>${t.motion || ""}</td><td class="mono">${esc(calls)}</td><td>${motion}</td><td>${x.total_s} s</td></tr>`;
   }).join("");
   $("summary").innerHTML = `<h2 style="margin:0 0 4px;font-size:17px">Session summary</h2>
     <p>${r.records.length} command${r.records.length === 1 ? "" : "s"}. Saved to <span class="mono">${esc(r.path)}</span></p>
-    <table><tr><th>Time</th><th>Command</th><th>Via</th><th>Tool calls</th><th>To motion</th><th>Total</th></tr>${rows}</table>
+    <table><tr><th>Time</th><th>Command</th><th>Via</th><th>Felt</th><th>Think</th><th>To confirm</th><th>Motion</th><th>Tool calls</th><th>To motion</th><th>Total</th></tr>${rows}</table>
     <button onclick="this.closest('dialog').close()">Close</button>`;
   $("summary").showModal();
 };

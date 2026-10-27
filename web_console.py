@@ -824,6 +824,35 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
+@app.get("/stage")
+def stage():
+    """The hands-free page: one big panel, the loop, the map, every setting in one pop-up."""
+    return send_from_directory(app.static_folder, "stage.html")
+
+
+# The stage's own settings: how much Rosa says, in whose words, and the two windows.
+VOICE_OUTPUT_SETTINGS = {
+    "voice_verbosity": lambda v: v in (0, 1, 2) and not isinstance(v, bool),
+    "voice_persona": lambda v: v in ("A", "B"),
+    "follow_up_s": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 30,
+    "confirm_timeout_s": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 5 <= v <= 120,
+    "map_ros": lambda v: isinstance(v, bool),
+}
+
+
+@app.post("/settings/voice")
+def voice_output_settings():
+    body = request.json or {}
+    for key, value in body.items():
+        if key not in VOICE_OUTPUT_SETTINGS:
+            return jsonify(error=f"{key} is not one of the stage's settings."), 400
+        if not VOICE_OUTPUT_SETTINGS[key](value):
+            return jsonify(error=f"{key}: {value!r} is out of range."), 400
+    config.save_settings(body)
+    return jsonify(ok=True, verbosity=config.VOICE_VERBOSITY, persona=config.VOICE_PERSONA,
+                   follow_up_s=config.FOLLOW_UP_S, confirm_timeout_s=config.CONFIRM_TIMEOUT_S, map_ros=config.MAP_ROS)
+
+
 @app.get("/state")
 def state():
     follow_left = max(0.0, console.follow_until - time.time())
@@ -1094,7 +1123,8 @@ def robot_action():
 
 @app.post("/finish")
 def finish():
-    return jsonify(console.finish())
+    out = console.finish()
+    return jsonify(path=out["path"], records=[{**r, "timings": timings(r)} for r in out["records"]])
 
 
 # -- voice: the switch, the address, and a window onto the voice app's own settings ------

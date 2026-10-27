@@ -74,3 +74,39 @@ def test_scripts_parse():
             subprocess.run([node, "--check", str(f)], check=True, capture_output=True)
             checked += 1
     assert checked > 0
+
+
+MAP_PROBE = r"""
+const fs = require("fs"); const vm = require("vm");
+const ctx = {console, window: {}, d3: {}};
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8") + "\nglobalThis.RosaMap = RosaMap;", ctx);
+const rows = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+const out = {};
+for (const showRos of [false, true]) {
+  const sel = ctx.RosaMap.select(rows, showRos);
+  out[showRos ? "ros" : "plain"] = {groups: sel.groups.map(g => g.id), offers: sel.offers.length,
+    collapsed: sel.groups.filter(g => g.collapsed).map(g => g.id)};
+}
+console.log(JSON.stringify(out));
+"""
+
+
+def test_map_select_hides_the_undescribed_by_default(tmp_path):
+    node = shutil.which("node")
+    if not node or not (STATIC / "map.js").exists():
+        pytest.skip("node or map.js missing")
+    import json
+    rows = [{"name": "/multiview_scan/capture", "node": "multiview_scan", "status": "ready", "say": "take a scan view", "moves_robot": False, "means": "Take one view", "kind": "service", "type": "Trigger"},
+            {"name": "/multiview_scan/fused", "node": "multiview_scan", "status": "undescribed", "say": "/multiview_scan/fused", "moves_robot": None, "means": "", "kind": "topic", "type": "PointCloud2"},
+            {"name": "go_home", "node": "moveit", "status": "ready", "say": "go home", "moves_robot": True, "means": "Home", "kind": "tool", "type": "MoveGroup action"}]
+    for i in range(160):
+        rows.append({"name": f"/controller_{i % 8}/thing_{i}", "node": f"controller_{i % 8}", "status": "undescribed", "say": f"/controller_{i % 8}/thing_{i}",
+                     "moves_robot": None, "means": "", "kind": "topic", "type": "std_msgs/msg/Float64"})
+    probe, data = tmp_path / "probe.js", tmp_path / "rows.json"
+    probe.write_text(MAP_PROBE)
+    data.write_text(json.dumps(rows))
+    out = json.loads(subprocess.run([node, str(probe), str(STATIC / "map.js"), str(data)], check=True, capture_output=True, text=True).stdout)
+    assert out["plain"]["groups"] == ["multiview_scan", "moveit"] and out["plain"]["offers"] == 2
+    assert out["ros"]["offers"] == 3                                   # the described group's undescribed row joins it
+    assert len(out["ros"]["collapsed"]) == 8 and out["ros"]["collapsed"][0].startswith("controller_")

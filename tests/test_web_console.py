@@ -901,3 +901,22 @@ def test_a_plain_question_still_goes_to_the_model(client, caps, recorder):
     client.post("/command", json={"text": "what can the camera see"})
     wait_until(lambda: not web_console.console.busy)
     assert client.agent.calls == 1
+
+
+# ---- the stage page and its settings pop-up ----
+
+def test_stage_page_is_served(client):
+    r = client.get("/stage")
+    assert r.status_code == 200 and b'id="settings"' in r.data and b"panels.js" in r.data and b"map.js" in r.data
+
+
+def test_voice_output_settings_route_validates(client, monkeypatch):
+    monkeypatch.setattr(web_console.config, "VOICE_VERBOSITY", 1)
+    monkeypatch.setattr(web_console.config, "VOICE_PERSONA", "A")
+    r = client.post("/settings/voice", json={"voice_verbosity": 2, "voice_persona": "B", "follow_up_s": 5, "confirm_timeout_s": 30, "map_ros": True})
+    assert r.status_code == 200 and r.get_json()["verbosity"] == 2 and web_console.config.VOICE_PERSONA == "B"
+    assert client.post("/settings/voice", json={"voice_verbosity": 7}).status_code == 400
+    assert client.post("/settings/voice", json={"confirm_timeout_s": 1}).status_code == 400
+    assert client.post("/settings/voice", json={"ollama_url": "http://x"}).status_code == 400     # not one of these settings
+    s = client.get("/state").get_json()
+    assert s["verbosity"] == 2 and s["persona"] == "B" and s["follow_up_s"] == 5 and s["confirm_timeout_s"] == 30 and s["map_ros"] is True
