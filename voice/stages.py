@@ -128,6 +128,12 @@ class Trigger:
         self.wake.reset()
         self.ptt.reset()
 
+    def press(self):
+        self.ptt.press()
+
+    def enable_wake(self, on):
+        self.wake.enabled = on
+
     def process(self, frame):
         wake = self.wake.process(frame)                # always fed, so its audio buffer stays continuous
         if self.ptt.process(frame):
