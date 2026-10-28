@@ -144,7 +144,7 @@ const VOICE_ACTIONS = {sent: "sent to the model", stopped: "stopped the arm", sw
                        busy: "not sent: the model was busy", off: "heard, but voice is off", empty: "", ignored: ""};
 function voiceLampText(v) {
   if (!v.on) return ["off", "Voice off"];
-  if (!v.running) return ["off", "Voice on, app not running"];
+  if (!v.running) return ["off", "Voice on, voice app not started"];
   const [lamp, word] = VOICE_STATES[v.state] || ["ok", v.state || "ready"];
   return [lamp, "Voice on, " + word];
 }

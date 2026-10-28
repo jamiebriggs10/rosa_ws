@@ -130,9 +130,9 @@ URSIM_IP = "192.168.56.101"
 RVIZ_CONFIG = ""
 
 # --- Voice control -----------------------------------------------------------------
-# Speech is handled by a separate program, the voice app (the Voice Control Prototype:
-# wake word or push-to-talk, then speech-to-text). It runs on the same computer as the
-# console and the console listens to it over HTTP (voice.py). All three are settings.
+# Speech is handled by a separate program, the voice app (voice_app/ in this repo: wake
+# word or push-to-talk, speech-to-text, and speaking back). It runs on the same computer
+# as the console and the console talks to it over HTTP (voice.py). All three are settings.
 VOICE_URL = "http://127.0.0.1:8100"   # where the voice app answers
 VOICE_ON = False                       # the header switch: whether spoken words become commands
 VOICE_CONFIRM = True                   # whether a spoken "confirm" / "no" may answer the confirm card

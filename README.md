@@ -225,10 +225,11 @@ both pages with scripted answers; see the header of that file.
 
 ## Voice control
 
-Speech is handled by a separate program, the **voice app** (the Voice Control
-Prototype: wake word or push-to-talk, then speech-to-text, with every stage
+Speech is handled by a separate program, the **voice app** (`voice_app/` in
+this repo: wake word or push-to-talk, then speech-to-text, with every stage
 swappable for the dissertation's comparisons). It runs on the same computer
-as the console, on port 8100, with its own settings file. The console listens
+as the console, on port 8100, with its own venv and settings file; `start.sh`
+starts it with the console. One repo, two processes. The console listens
 to it and, since the stage, talks back through it: it asks the voice app to
 play the loop's sounds (`/play`) and to speak the lines it composes (`/say`,
 Piper); the voice app mutes its own microphone while it speaks. The voice app
@@ -282,15 +283,18 @@ voice app (`start.sh` runs it in tmux session `voice` alongside the console
 and leaves it alone if it is already running; `tmux kill-session -t voice`
 stops it; its output is in `~/voice.log`).
 
-Getting the voice app onto the robot's computer: copy its folder (including
-the git-ignored `models/`, the downloaded speech models) to, say, `~/voice`,
-make a venv from its `requirements/nvidia.txt` (or `mac.txt`), fetch a Piper
-voice (`python -m piper.download_voices en_GB-alan-medium --data-dir
-models/piper`; Piper is GPL-3.0 and is cited), and leave `device: auto` in its
-`settings.yaml`; its `docs/03-portability.md` has the moving-day checklist.
-The voice app is kept separate on purpose: its speech libraries are heavy, its
-benchmark harness does not need ROS, and the console only needs its HTTP side
-(`voice.py` is the whole link).
+Setting the voice app up on the robot's computer: it arrives with `git pull`
+as `~/rosa_ws/voice_app/`. Inside that folder make its own venv from
+`requirements/nvidia.txt` (or `mac.txt` on a Mac), download the speech models
+(`python models.py`; they are git-ignored, about 4 GB), fetch a Piper voice
+(`python -m piper.download_voices en_GB-alan-medium --data-dir models/piper`;
+Piper is GPL-3.0 and is cited), and leave `device: auto` in its
+`settings.yaml`; its `docs/03-portability.md` has the checklist. The two stay
+separate processes on purpose: the speech libraries are heavy and pinned
+differently from ROS's Python, an audio crash must not stop the console, and
+the console only needs the HTTP side (`voice.py` is the whole link). Its tests
+run on a Mac without ROS: `cd voice_app && ./.venv/bin/python -m pytest -m
+"not model"`.
 
 ## The tool buttons
 
@@ -387,6 +391,7 @@ added the same way, one tool per type, never per node.
 | `desktop_tools.py` | the tool buttons: the fixed list of programs the console may open |
 | `robot_link.py` | the robot-connection ladder: the checks, the actions, the `robot_status` tool |
 | `voice.py` | the link to the voice app: its event stream, the word tests ("stop", "confirm", "no, …"), say/play/follow-up, the proxied requests |
+| `voice_app/` | the voice app itself: wake word, speech-to-text, speaking back; its own venv, settings, tests and docs (`voice_app/README.md`) |
 | `examples/` | the description file and the start scripts for the Strathclyde UR12e cell |
 | `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator; `tests/mock_console.py` serves the pages with scripted answers for page work on a Mac |
 

@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Control Prototype</title>
+<style>
+/* Light theme, system font, big text for the state badge and final text (readable from a metre). */
+:root { --bg:#f5f6f8; --card:#fff; --ink:#1b1f24; --mute:#6b7280; --line:#d9dde3; --accent:#2563eb;
+        --idle:#6b7280; --armed:#d97706; --listening:#16a34a; --finalising:#7c3aed; --bad:#dc2626; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif; }
+header { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:16px; align-items:center;
+         padding:12px 20px; background:var(--card); border-bottom:1px solid var(--line); }
+#state-badge { font-size:2rem; font-weight:700; padding:6px 24px; border-radius:999px; color:#fff;
+               min-width:210px; text-align:center; background:var(--idle); }
+#state-badge[data-state=armed] { background:var(--armed); }
+#state-badge[data-state=listening] { background:var(--listening); }
+#state-badge[data-state=finalising] { background:var(--finalising); }
+#meter { width:200px; height:16px; background:#e5e7eb; border-radius:8px; overflow:hidden; }
+#meter-bar { height:100%; width:0; background:var(--listening); transition:width .05s linear; }
+#ptt { font-size:1.4rem; font-weight:600; padding:14px 34px; border-radius:12px; border:2px solid var(--accent);
+       background:#fff; color:var(--accent); cursor:pointer; user-select:none; touch-action:none; }
+#ptt.held { background:var(--accent); color:#fff; }
+.switch { display:flex; align-items:center; gap:8px; cursor:pointer; }
+#conn { margin-left:auto; color:var(--bad); font-weight:600; display:none; }
+main { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:20px; padding:20px; align-items:start; }
+@media (max-width:900px) { main { grid-template-columns:1fr; } }
+section.card, aside .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:16px; }
+h2 { font-size:1rem; margin:0 0 8px; text-transform:uppercase; letter-spacing:.05em; color:var(--mute); }
+#current { min-height:3.2em; font-size:2rem; line-height:1.25; }
+#current .partial { color:#9ca3af; } #current .final { color:#000; font-weight:600; }
+.hist { border-top:1px solid var(--line); padding:10px 0; }
+.hist:first-child { border-top:0; }
+.hist .text { font-size:1.2rem; font-weight:600; }
+.hist .meta { color:var(--mute); font-size:.8rem; }
+.felt { font-size:1.6rem; font-weight:700; color:var(--accent); float:right; margin-left:12px; }
+.felt small { font-size:.75rem; color:var(--mute); font-weight:400; display:block; text-align:right; }
+.strip { position:relative; height:22px; margin:6px 0 2px; background:#eef0f3; border-radius:4px; }
+.strip .seg { position:absolute; top:0; bottom:0; }
+.strip .seg.pre { background:#bfdbfe; } .strip .seg.speech { background:#86efac; }
+.strip .seg.tail { background:#fde68a; } .strip .seg.stt { background:#c4b5fd; }
+.ticks { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:.75rem; color:var(--mute); }
+.legend i { display:inline-block; width:10px; height:10px; margin-right:3px; vertical-align:middle; }
+.stage { border-top:1px solid var(--line); padding:10px 0; }
+.stage:first-of-type { border-top:0; }
+.stage h3 { margin:0 0 6px; font-size:1rem; display:flex; gap:8px; align-items:center; }
+.badge { font-size:.7rem; background:#fef3c7; color:#92400e; padding:1px 8px; border-radius:99px; font-weight:600; }
+.knob { display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; align-items:center; margin:4px 0; font-size:.9rem; }
+.knob label { color:var(--mute); } .knob input[type=text], .knob input[type=number], .knob select, select.use { width:100%; padding:4px 6px; }
+select.use { font-size:1rem; }
+.help { grid-column:1/-1; font-size:.75rem; color:var(--mute); }
+/* "What is this?" dropdowns, text from static/help.json */
+details.explain { grid-column:1/-1; font-size:.8rem; margin:2px 0 6px; }
+details.explain summary { cursor:pointer; color:#2563eb; list-style:none; user-select:none; }
+details.explain summary::before { content:"\25B8  "; } details.explain[open] summary::before { content:"\25BE  "; }
+details.explain .body { background:#f8fafc; border:1px solid var(--line); border-radius:6px; padding:6px 10px; margin-top:4px; line-height:1.4; }
+details.explain .body p { margin:4px 0; }
+.stage h3 small { font-weight:400; color:var(--mute); }
+#saved { font-size:.8rem; color:var(--listening); min-height:1.2em; }
+.row { display:flex; gap:6px; margin:6px 0; } .row input { flex:1; padding:4px 6px; }
+button { cursor:pointer; padding:5px 12px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+table { border-collapse:collapse; width:100%; font-size:.9rem; }
+th, td { text-align:left; padding:4px 8px; border-bottom:1px solid var(--line); }
+#toasts { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:20; max-width:420px; }
+.toast { background:#fee2e2; border:1px solid var(--bad); color:#7f1d1d; padding:10px 12px; border-radius:8px; cursor:pointer; }
+.muted { color:var(--mute); }
+</style>
+</head>
+<body>
+<header>
+  <div id="state-badge" data-state="idle">Idle</div>
+  <div><div id="meter"><div id="meter-bar"></div></div><div class="muted" style="font-size:.7rem">mic level</div></div>
+  <button id="ptt">Hold to talk</button>
+  <label class="switch"><input type="checkbox" id="wake"> Wake word</label>
+  <div id="conn">Disconnected - retrying...</div>
+</header>
+
+<main>
+  <div>
+    <section class="card">
+      <h2>Current utterance</h2>
+      <div id="current"><span class="muted">Hold the button (or Space) and speak.</span></div>
+    </section>
+    <section class="card">
+      <h2>History <span class="legend muted" style="text-transform:none;letter-spacing:0">
+        <i style="background:#bfdbfe"></i>trigger-&gt;speech
+        <i style="background:#86efac"></i>speech
+        <i style="background:#fde68a"></i>wait for end
+        <i style="background:#c4b5fd"></i>STT</span></h2>
+      <div id="history"><span class="muted">Nothing yet.</span></div>
+    </section>
+    <section class="card">
+      <h2>Session stats (this page session)</h2>
+      <table><thead><tr><th>Settings</th><th>Count</th><th>Median felt delay</th><th>90th percentile</th></tr></thead>
+      <tbody id="stats"><tr><td colspan="4" class="muted">No utterances yet.</td></tr></tbody></table>
+    </section>
+  </div>
+
+  <aside>
+    <div class="card">
+      <h2>Device</h2>
+      <select id="device" class="use"><option>auto</option><option>cuda</option><option>metal</option><option>cpu</option></select>
+      <div id="machine" class="muted" style="font-size:.8rem;margin-top:4px"></div>
+      <div id="help-device"></div>
+    </div>
+    <div class="card">
+      <h2>Settings</h2>
+      <div id="saved"></div>
+      <div id="stages"></div>
+    </div>
+    <div class="card">
+      <h2>Presets</h2>
+      <div id="help-presets"></div>
+      <div class="row"><select id="preset-list" class="use"></select><button id="preset-load">Load</button></div>
+      <div class="row"><input id="preset-name" type="text" placeholder="new preset name"><button id="preset-save">Save as</button></div>
+    </div>
+  </aside>
+</main>
+<div id="toasts"></div>
+
+<script>
+"use strict";
+const STAGES = ["trigger", "vad", "endpoint", "stt"];
+const $ = (id) => document.getElementById(id);
+let settings = {}, options = {};            // latest server copies
+let HELP = { stages: {}, options: {}, knobs: {} };   // plain-English help from static/help.json
+const STAGE_TITLES = { trigger: "when to start listening", vad: "is someone speaking?",
+                       endpoint: "have you finished?", stt: "speech-to-text" };
+const feltList = [];                         // [{summary, felt}] for the stats table
+let pendingFinal = null;                     // final text waiting for its timings event
+
+// ---------- small helpers ----------
+// h("div", {class:"x"}, child, ...) builds a DOM element (textContent only, so no HTML injection).
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "on") for (const [ev, fn] of Object.entries(v)) el.addEventListener(ev, fn);
+    else if (k in el && k !== "list") el[k] = v; else el.setAttribute(k, v);
+  }
+  for (const kid of kids) el.append(kid);
+  return el;
+}
+function toast(msg) {
+  const t = h("div", { className: "toast", title: "click to dismiss" }, msg);
+  t.onclick = () => t.remove();
+  $("toasts").append(t);
+  setTimeout(() => t.remove(), 15000);
+}
+async function api(path, method, body) {
+  const r = await fetch(path, { method: method || "GET",
+    headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.error || r.statusText); e.status = r.status; throw e; }
+  return data;
+}
+const fmtMs = (v) => (v == null ? "-" : Math.round(v) + " ms");
+function deepMerge(a, b) {                   // merge patch b into a (objects only)
+  for (const [k, v] of Object.entries(b))
+    a[k] = (v && typeof v === "object" && !Array.isArray(v)) ? deepMerge(a[k] || {}, v) : v;
+  return a;
+}
+
+// ---------- live events (SSE) ----------
+function connect() {
+  const es = new EventSource("/events");     // the browser reconnects by itself after a drop
+  es.onopen = () => { $("conn").style.display = "none"; loadAll(); };
+  es.onerror = () => { $("conn").style.display = "block"; };
+  const on = (name, fn) => es.addEventListener(name, (e) => fn(JSON.parse(e.data)));
+
+  on("state", (d) => {
+    const names = { idle: "Idle", armed: "Armed", listening: "Listening", finalising: "Finishing" };
+    $("state-badge").dataset.state = d.state;
+    $("state-badge").textContent = names[d.state] || d.state;
+    if (d.state === "listening" || d.state === "armed") {
+      if (pendingFinal !== null || d.state === "listening") $("current").replaceChildren();
+    }
+  });
+  on("level", (d) => {                       // dB scale: -60 dB (silence) .. -10 dB (loud) -> 0..100 %
+    const db = 20 * Math.log10(Math.max(d.rms, 1e-6));
+    $("meter-bar").style.width = Math.max(0, Math.min(100, (db + 60) * 2)) + "%";
+  });
+  on("partial", (d) => $("current").replaceChildren(h("span", { className: "partial" }, d.text)));
+  on("final", (d) => {
+    pendingFinal = d;
+    $("current").replaceChildren(h("span", { className: "final" }, d.text || "(nothing heard)"));
+  });
+  on("timings", (d) => {                     // arrives right after "final": complete the history entry
+    const f = pendingFinal || { text: "", outcome: "" };
+    pendingFinal = null;
+    addHistory({ final: f.text, outcome: f.outcome, settings_summary: d.settings_summary,
+                 marks_audio_s: d.marks_audio_s, derived: d.derived, time: new Date().toLocaleTimeString() }, true);
+  });
+  on("loading", (d) => {
+    const b = $("load-" + d.stage);
+    if (!b) return;
+    b.textContent = d.done ? (d.seconds != null ? `loaded ${d.option} (${d.seconds}s)` : "loaded") : `loading ${d.option}...`;
+    b.style.display = "inline";
+    if (d.done) setTimeout(() => { b.style.display = "none"; }, 4000);
+  });
+  on("error", (d) => toast(`${d.stage}${d.option ? " / " + d.option : ""}: ${d.message}`));
+}
+
+// ---------- history + timing strip ----------
+function addHistory(r, atTop) {
+  const box = $("history");
+  if (box.querySelector(".muted")) box.replaceChildren();
+  const felt = r.derived && r.derived.felt_delay_ms;
+  if (atTop && felt != null) { feltList.push({ summary: r.settings_summary || "?", felt }); renderStats(); }
+  box.prepend(h("div", { className: "hist" },
+    h("div", { className: "felt" }, felt == null ? "-" : Math.round(felt) + " ms", h("small", {}, "felt delay")),
+    h("div", { className: "text" }, r.final || "(nothing heard)"),
+    h("div", { className: "meta" }, `${r.time || ""} ${r.outcome || ""} ${r.settings_summary || ""}`),
+    strip(r.marks_audio_s || {}, r.derived || {})));
+  while (box.children.length > 20) box.lastChild.remove();
+}
+// Bar from trigger to final text. Final = speech_end + felt delay (both measured on the audio clock).
+function strip(m, d) {
+  const t0 = m.trigger ?? m.speech_start, ss = m.speech_start, se = m.speech_end, tc = m.turn_closed;
+  const fin = (se != null && d.felt_delay_ms != null) ? se + d.felt_delay_ms / 1000 : null;
+  const pts = [["trigger", m.trigger], ["speech start", ss], ["speech end", se], ["turn closed", tc], ["final", fin]];
+  const end = Math.max(...pts.map((p) => p[1]).filter((v) => v != null), (t0 ?? 0) + 0.001);
+  const span = end - (t0 ?? 0) || 1;
+  const bar = h("div", { className: "strip" });
+  const seg = (a, b, cls) => {
+    if (a == null || b == null || b <= a) return;
+    bar.append(h("div", { className: "seg " + cls,
+      style: `left:${(a - t0) / span * 100}%;width:${(b - a) / span * 100}%` }));
+  };
+  seg(t0, ss, "pre"); seg(ss, se, "speech"); seg(se, tc, "tail"); seg(tc ?? se, fin, "stt");
+  const ticks = h("div", { className: "ticks" });
+  let prev = null;
+  for (const [name, v] of pts) {
+    if (v == null) continue;
+    ticks.append(h("span", {}, prev == null ? name : `${name} +${Math.round((v - prev) * 1000)}`));
+    prev = v;
+  }
+  return h("div", {}, bar, ticks);
+}
+
+// ---------- session stats ----------
+function pct(sorted, p) { return sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)]; }
+function renderStats() {
+  const groups = {};
+  for (const x of feltList) (groups[x.summary] ||= []).push(x.felt);
+  const rows = Object.entries(groups).map(([s, v]) => {
+    v.sort((a, b) => a - b);
+    const med = v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2;
+    return h("tr", {}, h("td", {}, s), h("td", {}, String(v.length)), h("td", {}, fmtMs(med)), h("td", {}, fmtMs(pct(v, 0.9))));
+  });
+  $("stats").replaceChildren(...rows);
+}
+
+// ---------- push to talk (button + Space) ----------
+let held = false;
+function ptt(down) {
+  if (held === down) return;
+  held = down;
+  $("ptt").classList.toggle("held", down);
+  api(down ? "/ptt/down" : "/ptt/up", "POST").catch((e) => toast("push-to-talk: " + e.message));
+}
+const pttBtn = $("ptt");
+pttBtn.addEventListener("pointerdown", (e) => { pttBtn.setPointerCapture(e.pointerId); ptt(true); });
+for (const ev of ["pointerup", "pointerleave", "pointercancel"]) pttBtn.addEventListener(ev, () => ptt(false));
+function inField(el) { return el && ["INPUT", "SELECT", "TEXTAREA"].includes(el.tagName); }
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" || e.repeat || inField(e.target)) return;
+  e.preventDefault(); ptt(true);
+});
+window.addEventListener("keyup", (e) => { if (e.code === "Space" && !inField(e.target)) { e.preventDefault(); ptt(false); } });
+window.addEventListener("blur", () => ptt(false));     // never leave the mic stuck open
+
+$("wake").addEventListener("change", (e) =>
+  api("/wake", "POST", { on: e.target.checked }).catch((err) => toast("wake: " + err.message)));
+
+// ---------- settings panel ----------
+let patch = {}, timer = null;
+function queueChange(path, value) {           // path like ["stt","parakeet","model"]
+  let node = patch;
+  path.slice(0, -1).forEach((k) => { node = node[k] ||= {}; });
+  node[path[path.length - 1]] = value;
+  clearTimeout(timer);
+  timer = setTimeout(flush, 400);              // debounce: send once typing/slider stops
+}
+async function flush() {
+  const body = patch; patch = {};
+  try {
+    settings = await api("/settings", "POST", body);
+    $("saved").textContent = "saved - applies to next utterance";
+    setTimeout(() => { $("saved").textContent = ""; }, 3000);
+  } catch (e) { toast("settings: " + e.message); await loadSettings(); }
+}
+function knobInput(path, spec, value) {
+  const send = (v) => queueChange(path, v);
+  const cur = value === undefined ? spec.default : value;
+  switch (spec.type) {
+    case "bool": return h("input", { type: "checkbox", checked: !!cur, on: { change: (e) => send(e.target.checked) } });
+    case "choice": return h("select", { on: { change: (e) => send(e.target.value) } },
+      ...(spec.choices || []).map((c) => h("option", { value: c, selected: c === cur }, String(c))));
+    case "int": case "float": {
+      const isInt = spec.type === "int";
+      return h("input", { type: "number", value: cur ?? "", min: spec.min ?? "", max: spec.max ?? "",
+        step: spec.step ?? (isInt ? 1 : "any"),
+        on: { change: (e) => { const n = isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value); if (!isNaN(n)) send(n); } } });
+    }
+    case "list": return h("input", { type: "text", value: (cur || []).join(", "),
+      on: { change: (e) => send(e.target.value.split(",").map((s) => s.trim()).filter(Boolean)) } });
+    default: return h("input", { type: "text", value: cur ?? "", on: { change: (e) => send(e.target.value) } });
+  }
+}
+// A collapsed "What is this?" dropdown built from one help.json entry ("" if there is none).
+function explain(entry, label) {
+  if (!entry || !entry.what) return "";
+  const body = h("div", { className: "body" }, h("p", {}, entry.what));
+  if (entry.higher) body.append(h("p", {}, h("b", {}, "Turn it up: "), entry.higher));
+  if (entry.lower) body.append(h("p", {}, h("b", {}, "Turn it down: "), entry.lower));
+  if (entry.start) body.append(h("p", {}, h("b", {}, "Start with: "), entry.start));
+  return h("details", { className: "explain" }, h("summary", {}, label || "What is this?"), body);
+}
+function knobRow(path, name, spec, value) {
+  return h("div", { className: "knob" }, h("label", {}, name), knobInput(path, spec, value),
+    spec.help ? h("div", { className: "help" }, spec.help) : "",
+    explain(HELP.knobs[path.join(".")]));
+}
+const STT_COMMON = {               // knobs shared by every stt option live directly under stt:
+  mode: { type: "choice", choices: ["batch", "streaming"], help: "batch = decode after the turn; streaming = live partials" },
+  partial_every_ms: { type: "int", min: 100, max: 5000, step: 100, help: "how often a partial is produced" },
+  language: { type: "str" },
+  prompt: { type: "str", help: "vocabulary hint for the engine" },
+};
+function renderStages() {
+  const root = $("stages");
+  root.replaceChildren();
+  for (const stage of STAGES) {
+    const opts = (options[stage] || {}), cfg = settings[stage] || {};
+    const sel = h("select", { className: "use", on: { change: (e) => {
+      queueChange([stage, "use"], e.target.value); setTimeout(renderStages, 600); } } });
+    for (const [name, o] of Object.entries(opts)) {
+      const op = h("option", { value: name, selected: name === cfg.use }, name + (o.supported ? "" : " (unavailable)"));
+      if (!o.supported) { op.disabled = true; op.title = o.reason || "not supported on this machine"; }
+      sel.append(op);
+    }
+    const box = h("div", { className: "stage" },
+      h("h3", {}, stage, h("small", {}, STAGE_TITLES[stage] || ""),
+        h("span", { id: "load-" + stage, className: "badge", style: "display:none" }, "loading...")),
+      explain(HELP.stages[stage], "What is this?"), sel,
+      explain(HELP.options[`${stage}.${cfg.use}`], "About this option"));
+    if (stage === "stt")
+      for (const [k, spec] of Object.entries(STT_COMMON)) box.append(knobRow([stage, k], k, spec, cfg[k]));
+    // "both" uses the wake word's settings, which live under trigger.openwakeword.
+    const owner = (stage === "trigger" && cfg.use === "both") ? "openwakeword" : cfg.use;
+    const o = opts[owner];
+    if (o) for (const [k, spec] of Object.entries(o.knobs || {}))
+      box.append(knobRow([stage, owner, k], k, spec, (cfg[owner] || {})[k]));
+    root.append(box);
+  }
+  $("device").value = settings.device || "auto";
+}
+
+// ---------- presets ----------
+async function loadPresets() {
+  try {
+    const names = await api("/presets");
+    $("preset-list").replaceChildren(...names.map((n) => h("option", { value: n }, n)));
+  } catch (e) { toast("presets: " + e.message); }
+}
+$("preset-load").onclick = async () => {
+  const n = $("preset-list").value;
+  if (!n) return;
+  try { settings = await api(`/presets/${encodeURIComponent(n)}/load`, "POST"); renderStages(); $("saved").textContent = "preset loaded - applies to next utterance"; }
+  catch (e) { toast("preset: " + e.message); }
+};
+$("preset-save").onclick = async () => {
+  const n = $("preset-name").value.trim();
+  if (!n) return;
+  const url = `/presets/${encodeURIComponent(n)}`;
+  try {
+    try { await api(url, "POST"); }
+    catch (e) {
+      if (e.status !== 409 || !confirm(`Preset "${n}" exists. Overwrite it?`)) throw e;
+      await api(url + "?overwrite=1", "POST");
+    }
+    $("preset-name").value = "";
+    await loadPresets();
+  } catch (e) { if (e.status !== 409) toast("preset: " + e.message); }
+};
+$("device").addEventListener("change", (e) => queueChange(["device"], e.target.value));
+
+// ---------- start-up ----------
+async function loadSettings() { settings = await api("/settings"); renderStages(); }
+async function loadAll() {
+  try {
+    const [o, st, hist] = await Promise.all([api("/options"), api("/status"), api("/history")]);
+    HELP = await api("/static/help.json").catch(() => HELP);
+    $("help-device").replaceChildren(explain(HELP.stages.device));
+    $("help-presets").replaceChildren(explain(HELP.stages.presets));
+    options = o.options;
+    const m = o.machine || {};
+    $("machine").textContent = `Using ${o.device}. Detected: ${m.detected || "?"} (${m.os || ""} ${m.machine || ""}, ${m.host || ""})`;
+    $("wake").checked = !!st.wake_on;
+    $("history").replaceChildren();
+    [...hist].forEach((r) => addHistory(r, false));   // oldest first, so prepend leaves newest on top
+    if (!hist.length) $("history").append(h("span", { className: "muted" }, "Nothing yet."));
+    await loadSettings();
+    await loadPresets();
+  } catch (e) { toast("loading page data: " + e.message); }
+}
+connect();
+</script>
+</body>
+</html>

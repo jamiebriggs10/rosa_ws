@@ -15,5 +15,5 @@
   "voice_url": "http://127.0.0.1:8100",
   "voice_on": false,
   "voice_confirm": false,
-  "voice_start": "~/voice/.venv/bin/python ~/voice/app.py"
+  "voice_start": "~/rosa_ws/voice_app/.venv/bin/python ~/rosa_ws/voice_app/app.py"
 }

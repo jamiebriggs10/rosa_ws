@@ -1,0 +1,12 @@
+{
+  "model": "truffles",
+  "synthetic_test_clips": true,
+  "positive_clips": 300,
+  "near_miss_clips": 300,
+  "detected_at_0.3": 0.987,
+  "near_miss_fired_at_0.3": 0.003,
+  "detected_at_0.5": 0.977,
+  "near_miss_fired_at_0.5": 0.003,
+  "detected_at_0.7": 0.96,
+  "near_miss_fired_at_0.7": 0.003
+}

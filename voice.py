@@ -1,6 +1,6 @@
 """The console's link to the voice app.
 
-Speech is handled by a separate program, the Voice Control Prototype ("the voice app"): it
+Speech is handled by a separate program, the voice app (voice_app/ in this repo): it
 listens to the microphone, waits for the wake word or a push-to-talk press, works out when
 the speaker has finished, and turns the words into text. It has its own page on port 8100
 and its own settings file (settings.yaml). This module is the console's end of the wire.

@@ -199,7 +199,7 @@
       <div class="alert" id="voice-alert" hidden></div>
       <div class="row"><label>Rosa says <select id="s-verbosity"><option value="0">sounds only</option><option value="1">read-backs and results</option><option value="2">everything (prefaces, cancels)</option></select></label>
         <label>in the words of <select id="s-persona"><option value="A">A · the technician</option><option value="B">B · the colleague</option></select></label>
-        <label>voice <select id="s-speech-voice"><option value="">(voice app not running)</option></select></label>
+        <label>voice <select id="s-speech-voice"><option value="">(voice app not started)</option></select></label>
         <button type="button" id="s-test-voice">Say "This is Rosa"</button></div>
       <div class="row"><label>No wake word needed for <input type="number" id="s-follow" min="0" max="30" step="1" style="width:60px"> s after Rosa speaks</label>
         <label>A confirm card waits <input type="number" id="s-timeout" min="5" max="120" step="5" style="width:60px"> s</label></div>
@@ -413,7 +413,7 @@ async function loadSpeechVoices() {
     const [o, s] = await Promise.all([vapi("options"), vapi("settings")]);
     const current = (s.speech || {}).voice || "";
     $("s-speech-voice").innerHTML = (o.voices || []).map(v => `<option value="${esc(v)}" ${v === current ? "selected" : ""}>${esc(v)}</option>`).join("") || `<option value="">(no voices in models/piper)</option>`;
-  } catch { $("s-speech-voice").innerHTML = `<option value="">(voice app not running)</option>`; }
+  } catch { $("s-speech-voice").innerHTML = `<option value="">(voice app not started)</option>`; }
 }
 $("s-speech-voice").onchange = e => { if (e.target.value) vapi("settings", "POST", {speech: {voice: e.target.value}}).catch(err => voiceProblem("Voice: " + err.message)); };
 $("s-test-voice").onclick = () => vapi("say", "POST", {text: "This is Rosa."}).catch(err => voiceProblem("Voice: " + err.message));
