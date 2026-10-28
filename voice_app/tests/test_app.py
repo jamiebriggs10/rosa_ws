@@ -201,3 +201,10 @@ def test_output_device_setting_reaches_the_speaker(tmp_path, monkeypatch):
     assert seen[-1] == ("en_GB-alan-medium", None)
     assert c.post("/settings", json={"speech": {"output_device": "Jabra"}}).status_code == 200
     assert seen[-1] == ("en_GB-alan-medium", "Jabra")
+
+
+def test_load_falls_back_to_the_example_settings_when_the_file_is_missing(tmp_path):
+    # settings.yaml is git-ignored (the page rewrites it), so a fresh clone has none.
+    import config
+    settings = config.load(tmp_path / "settings.yaml")
+    assert settings["trigger"]["use"] and settings["stt"]["use"]

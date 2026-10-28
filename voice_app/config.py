@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent
 SETTINGS = ROOT / "settings.yaml"
+EXAMPLE = ROOT / "settings.example.yaml"   # what a fresh clone starts from (settings.yaml is git-ignored)
 PRESETS = ROOT / "presets"
 
 # Knobs in the `stt:` block that apply to every engine, not just one.
@@ -18,6 +19,8 @@ HEADER = ("# Voice Control Prototype: current settings (the web page rewrites th
 
 
 def load(path=SETTINGS) -> dict:
+    if not Path(path).exists():
+        path = EXAMPLE
     with open(path) as f:
         return yaml.safe_load(f) or {}
 
