@@ -2,7 +2,7 @@
 
 Run on the ZenBook, open from the Mac at http://<zenbook-ip>:8000.
 
-One Flask app, one page (static/index.html), and these JSON endpoints:
+One Flask app, one page (static/stage.html), and these JSON endpoints:
   GET  /state    everything the page shows, polled once a second
   GET  /models   the models Ollama has, and which of them can call tools
   GET  /cell     MoveIt's model of the cell (walls, table, keep-out zones) for the 3D view

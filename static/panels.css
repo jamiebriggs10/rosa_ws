@@ -1,8 +1,5 @@
-/* Styles shared by the workbench (index.html) and the stage (stage.html) for the panels in
-   panels.js: the help panels, the limits bar, the tool buttons, the robot ladder, the voice
-   dialog and the voice app's settings, the saved moves, and the loop's lamp. Colours come from
-   the page's own tokens (--panel, --line, --ink, --muted, --action, --ok, --bad, --gate, --gate-bg,
-   --you-bg, --bg), so the stage's light settings pop-up sets those on itself. */
+/* Styles for the panels of the Settings pop-up (the robot ladder, the voice section, the limits, the
+   capabilities table) and the phase lamp. Loaded by stage.html after its own styles. */
 /* The help panels and the capabilities table */
   .help form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
   .help form input { flex: 1 1 220px; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }

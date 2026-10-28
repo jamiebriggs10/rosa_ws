@@ -831,7 +831,7 @@ def test_stop_is_announced_once(client, recorder, monkeypatch):
     assert len(stops) == 1 and recorder.play_calls.count("cancel") == 1
 
 
-def test_a_tap_confirm_closes_the_voice_apps_window(client, recorder):
+def test_a_tap_confirm_closes_the_follow_up_window(client, recorder):
     c = web_console.console
     line_agent(client, {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6})
     client.post("/command", json={"text": "go to point ten"})
@@ -859,7 +859,7 @@ def test_a_command_interrupts_a_tour(client, caps, recorder):
     assert tails == []
 
 
-def test_the_voice_apps_listening_state_sets_the_phase(client, voice_on, recorder):
+def test_the_listening_state_sets_the_phase(client, voice_on, recorder):
     c = web_console.console
     c.voice_state("armed")
     assert c.phase == "listening" and recorder.play_calls[-1] == "listen"
