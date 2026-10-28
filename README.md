@@ -21,16 +21,19 @@ Built by Jamie Briggs for a University of Strathclyde dissertation, on top of
 - **A safety layer** that caps every move, refuses what MoveIt cannot plan
   cleanly, refuses writes to anything not described, and puts every motion
   behind a confirm card that shows the plan on a 3D view first.
-- **A web console** in two pages: the workbench (chat, the 3D view, a stop
-  button, the safety limits, the model picker and the settings) and the stage
-  (hands-free: one big panel, sounds and speech, a map of what the system
-  offers, every setting in one pop-up).
+- **One page, the stage**, made to be used by ear from across the cell: one
+  big panel that says what Rosa is doing, heard, proposes and measured; the
+  3D view with the planned path; a map of what the connected nodes offer;
+  every setting in one pop-up.
+- **Voice, in the same program**: the wake word "truffles" or a Hold-to-talk
+  button, speech-to-text on this computer, and Rosa speaking back. Only the
+  word "confirm" moves the robot.
 
 ## What you need
 
 | Where | What |
 |---|---|
-| The robot's computer | Ubuntu 22.04 with ROS 2 Humble and MoveIt 2, the robot's own driver and MoveIt launch, `git`, `python3-pip` |
+| The robot's computer | Ubuntu 22.04 with ROS 2 Humble and MoveIt 2, the robot's own driver and MoveIt launch, `git`, `python3-pip`; a microphone and a speaker (the Jabra headset in the lab) for voice |
 | Any machine on the same network | [Ollama](https://ollama.com) with a model that can call tools (`ollama pull llama3.1:8b`), set to listen on the network (Ollama app: Settings, "Expose Ollama to the network"; or `OLLAMA_HOST=0.0.0.0 ollama serve`) |
 
 The two are usually the same machine: see `--with-ollama` under Install.
@@ -104,7 +107,6 @@ The robot software comes from three optional keys in
 | `sim_start` | the simulator itself, for example URSim | `sim`, `~/sim.log` |
 | `robot_start_sim` | your driver and MoveIt against the simulator | `robot`, `~/robot.log` |
 | `robot_start` | your driver and MoveIt against the real robot | `robot`, `~/robot.log` |
-| `voice_start` | the voice app (see *Voice control*), started with the console, left running by `stop` | `voice`, `~/voice.log` |
 
 `tmux attach -t robot` shows the robot software running (Ctrl-b then d to
 leave it running). Without tmux the command runs in the background instead.
@@ -150,11 +152,11 @@ If the robot is not a UR12e, first edit the MoveIt section of
 `~/rosa_ws/config.py`: the planning group, the base and tool frame names, and
 the home pose, as its MoveIt config defines them.
 
-## The robot-connection widget
+## The robot connection
 
-The button next to the three lights says in a few words whether the robot can
-be driven ("Real robot: not plugged in", "Simulator: ready"). Click it for the
-full picture: a ladder of checks, run every few seconds on the robot's
+The chip in the header says in a few words whether the robot can be driven
+("Real robot: not plugged in", "Simulator: ready"). Settings › Robot connection
+has the full picture: a ladder of checks, run every few seconds on the robot's
 computer, that stops at the first problem and says whose job it is.
 
 | Real robot | Simulator |
@@ -180,11 +182,10 @@ same ladder, so "is the robot ready?" gets a true answer.
 
 ## The stage
 
-The console has two pages. The **workbench** (`/`, everything above) is for typing at the
-desk. The **stage** (`/stage`, the *Stage* link in the header) is for working by ear and
-from across the cell: one big panel that says what Rosa is doing, what she heard, what she
-proposes and what she measured; the 3D view with the planned path; and the **map**, a graph
-of what the connected nodes offer. Each page remembers itself as the one to open.
+The page at `/` is the **stage**, made for working by ear and from across the cell as much
+as for typing at the desk: one big panel that says what Rosa is doing, what she heard, what
+she proposes and what she measured; the 3D view with the planned path; the **map**, a graph
+of what the connected nodes offer; the line to type into; and Confirm, No and Stop buttons.
 
 Everything on the stage comes from the same console. What it shows is driven by the
 **loop**: one phase at a time, each with a lamp colour, a sound and (by verbosity) a
@@ -201,13 +202,10 @@ spoken line:
 | cancelled, stopped | red | a low note | "Cancelled." (2) / "Stopped at x, y, z." |
 | follow | amber, dim | | (the follow-up window: no wake word needed) |
 
-The stage's **Settings** pop-up holds every setting of the workbench (model, safety limits,
-the robot-connection ladder, voice, tools, what the system offers, session) plus the stage's
-own: how much Rosa says (`voice_verbosity`: 0 sounds only, 1 read-backs and results, 2
-everything), in whose words (`voice_persona`: A the technician, B the colleague; see
-`lines.py`), the follow-up window (`follow_up_s`, default 8), how long a confirm card waits
-(`confirm_timeout_s`, default 20), the map's "show ROS", and the speech voice. The chat and
-the saved moves stay on the workbench.
+The **Settings** pop-up holds every setting: the model and the Ollama address, the safety
+limits, the robot-connection ladder, the Voice section (below), what the system offers (with
+the map's "show ROS"), and the session buttons (new conversation; finish, which writes the
+session table to `sessions/`).
 
 **The map** draws `/capabilities`: Rosa in the middle, one node per program (MoveIt, the UR
 driver, and every node the description file names or whose interfaces it describes), one
@@ -220,107 +218,50 @@ rest collapsed into one node per group with a count. The questions the map answe
 answered by the console itself, never by the model: "what can I do (with X)", "what's
 connected to X", "which of these move the robot", "where did that go", "show / hide ros".
 
-For page work without ROS (on a Mac), `python3 tests/mock_console.py --rows 160` serves
-both pages with scripted answers; see the header of that file.
-Add `--voice http://127.0.0.1:8100` and the mock talks to a real voice app, which runs
-natively on the Mac (`cd voice_app && .venv/bin/python app.py`, started from your own
-Terminal so macOS lets it use the microphone): the wake word, the sounds, the read-backs and
-"confirm" then all work at home, with the pretend robot.
+For page work without ROS (on a Mac), `venv/bin/python tests/mock_console.py --rows 160`
+serves the page with scripted answers; see the header of that file. `--voice` runs the real
+voice package on the microphone in the same process (start it from your own Terminal so macOS
+lets it use the mic), `--voice-file tests/clips/truffles-go-home.wav` loops a clip instead:
+the wake word, the sounds, the read-backs and "confirm" then all work at home, with the
+pretend robot.
 
 ## Voice control
 
-Speech is handled by a separate program, the **voice app** (`voice_app/` in
-this repo: wake word or push-to-talk, then speech-to-text, with every stage
-swappable for the dissertation's comparisons). It runs on the same computer
-as the console, on port 8100, with its own venv and settings file; `start.sh`
-starts it with the console. One repo, two processes. The console listens
-to it and, since the stage, talks back through it: it asks the voice app to
-play the loop's sounds (`/play`) and to speak the lines it composes (`/say`,
-Piper); the voice app mutes its own microphone while it speaks. The voice app
-never talks to the robot. Without it, the console works by typing and the
-lamp still shows the phase; it simply makes no sound.
+Voice is part of the console: the package `voice/` runs the microphone on its own thread
+inside the same program, and the console starts it with everything else. Nothing is
+installed or started separately.
 
-On the workbench, next to the robot widget, there is a **Voice** pill and a gear.
-The pill is the switch; the gear opens the voice pop-up: the same switch, a
-microphone level bar, the live text as it is heard with the felt delay, a *Hold
-to talk* button, and every setting of the voice app (device; for each stage the
-option in force and its knobs, each with a "What is this?"), presets, the voice
-app's address, and the voice-confirm checkbox. On the stage the same controls
-are in the Settings pop-up under *Voice*.
+- `voice/stages.py`: the wake word **"truffles"** (openWakeWord, a model trained for this
+  project, `models/truffles.onnx`) or the **Hold to talk** button; Silero to tell speech
+  from silence; the turn ends after `silence_ms` of silence (a wake-word turn) or when the
+  button is let go; **Parakeet** (NVIDIA, through sherpa-onnx, int8, CPU or CUDA) turns the
+  whole turn into text at once. These are the winners of the voice prototype's benchmark of
+  8 October 2026; the prototype itself (`Dissertation/Voice Control Prototype`) stays outside
+  this repo as the test bench for comparing options.
+- `voice/pipeline.py`: the state machine (idle, armed, listening, finalising), the pre-roll
+  so the first word is never lost, the follow-up window, and muting while Rosa speaks so she
+  never hears herself. One line per utterance goes to `sessions/voice-<date>.jsonl` with the
+  felt delay (end of speech to text).
+- `voice/speech.py`: Rosa's voice (Piper, `models/piper/`) and the loop's sounds.
+- `voice/words.py`: what a phrase means. "stop" (alone) halts the arm without the model.
+  Only **"confirm"** or **"go ahead"** answer a card; "no" or "cancel" declines it; "no,
+  point eleven" declines it and runs the rest next, with one line of context; anything else
+  said over a card does the same. One "no" covers the run. A card nobody answers is
+  cancelled after `confirm_timeout_s`. After Rosa speaks, the follow-up window (`follow_up_s`)
+  needs no wake word.
 
-With voice on, what you say arrives as a command, marked with a 🎤, and the
-model treats it exactly like typed text: the same tools, the same safety
-checks, the same confirm card. What is different:
+The Voice section of the Settings pop-up: the switch; the live part (level, what was heard
+with its felt delay, what was done with it, Hold to talk); **Hearing** (the microphone, the
+wake word's threshold, the end-of-turn silence, voice confirm); **Speaking** (Rosa on or off,
+the Piper voice, the speaker, Test voice; the sounds; how much Rosa says, `verbosity` 0, 1 or
+2; in whose words, `persona` A or B, see `lines.py`; the follow-up window; the card timeout).
+Every one of them is a key of the `voice` block in `settings.json`
+(`examples/settings.example.json` lists them with their defaults).
 
-- **"Stop"** (or "halt", "freeze", on its own) halts the arm at once, without
-  the model. With a streaming speech-to-text engine this happens on the live
-  text, before you have finished the word.
-- **One word moves the robot.** With voice confirm on (the default now that the
-  words are strict), a card is answered by **"confirm"** or **"go ahead"** as a
-  whole utterance. "yes", "okay" and "go" do not count: they are too easy to
-  mishear or to say in passing. "no" or "cancel" cancels.
-- **"No, point eleven"** is a one-step correction: the card is cancelled, and
-  once the model has finished with the declined move, "point eleven" runs as
-  the next command with one line of context, so the model proposes again
-  ("Point 11 instead. …"). Anything else said over a card that is not a
-  yes-word does the same (a question is not a yes). One correction is held at
-  a time; a second replaces it.
-- **One "no" covers the run.** If the model raises another card for the same
-  command after you declined, it is declined without asking.
-- **A card nobody answers** is cancelled after `confirm_timeout_s` (20 s), and
-  Rosa says so.
-- **The follow-up window.** After Rosa proposes, reports a move, refuses or
-  cancels, the voice app accepts speech without the wake word for
-  `follow_up_s` (8 s), as Alexa's follow-up mode does; the stage says "Your
-  turn". The model's own replies never open it.
-
-If the model is still busy when you speak (and no card is showing), nothing is
-queued: the chat says what was heard and asks you to say it again. The session
-table and the summary have a *Via* column (typed, voice or map) and the loop's
-timings per command: felt delay (from the voice app), think, to confirm,
-motion.
-
-The settings in `settings.json`: `voice_url` (default `http://127.0.0.1:8100`),
-`voice_on`, `voice_confirm`, `voice_verbosity`, `voice_persona`, `follow_up_s`,
-`confirm_timeout_s`, `map_ros`, and `voice_start`, the command that starts the
-voice app (`start.sh` runs it in tmux session `voice` alongside the console
-and leaves it alone if it is already running; `tmux kill-session -t voice`
-stops it; its output is in `~/voice.log`).
-
-Setting the voice app up on the robot's computer: it arrives with `git pull`
-as `~/rosa_ws/voice_app/`. Inside that folder make its own venv from
-`requirements/nvidia.txt` (or `mac.txt` on a Mac), download the speech models
-(`python models.py`; they are git-ignored, about 4 GB), fetch a Piper voice
-(`python -m piper.download_voices en_GB-alan-medium --data-dir models/piper`;
-Piper is GPL-3.0 and is cited), and leave `device: auto` in its
-`settings.yaml`; its `docs/03-portability.md` has the checklist. The two stay
-separate processes on purpose: the speech libraries are heavy and pinned
-differently from ROS's Python, an audio crash must not stop the console, and
-the console only needs the HTTP side (`voice.py` is the whole link). Its tests
-run on a Mac without ROS: `cd voice_app && ./.venv/bin/python -m pytest -m
-"not model"`.
-
-## The tool buttons
-
-When the page is opened on the robot's computer itself, a row of buttons
-under the safety limits opens the usual ROS tools on that screen, next to
-the console:
-
-| Button | Opens |
-|---|---|
-| RViz | `rviz2`, with the file named by `"rviz_config"` in `settings.json` if there is one |
-| Node graph | `rqt_graph`: which nodes talk to which |
-| ROS logs | `rqt_console`: every node's log lines |
-| rqt | `rqt`: plots, topic monitor, the rest of the rqt plugins |
-| Terminal | a terminal with ROS and your workspaces already loaded |
-| Record session | `ros2 bag record` of every topic except images and point clouds, into `sessions/bag-<date>`; press again to stop |
-
-The page only ever sends a button's name; the commands live in
-`desktop_tools.py` and nothing else can be started from the page. Buttons
-that need a screen are hidden when the console has none, for example when the
-page is opened from another computer; `start.sh` hands the screen to the
-console service, so run it from a terminal on the robot's computer's own
-desktop. Each press is a line in the session table.
+The models: `venv/bin/python -m voice.models` downloads Silero, the Parakeet bundle,
+openWakeWord's shared files and the Piper voice into `models/` (git-ignored; the wake word
+model is in the repo). On a computer without a sound card library the console still starts;
+the Voice section says what is missing.
 
 ## Letting the model use the robot system's own nodes
 
@@ -389,15 +330,14 @@ added the same way, one tool per type, never per node.
 | `rosa_agent.py` | builds the ROSA agent; `python rosa_agent.py` is a terminal version |
 | `web_console.py` | the console: the loop (phases), the confirm gate, the held corrections, the self-questions and the spoken tour, every route |
 | `lines.py` | what Rosa says at each moment, in two personas, from measured facts |
-| `static/index.html`, `static/stage.html` | the workbench and the stage; both load `view.js` (the 3D view), `panels.js` + `panels.css` (the settings panels) and the stage `map.js` (the capability map) |
+| `static/stage.html` | the page; it loads `view.js` (the 3D view), `panels.js` + `panels.css` (the settings pop-up) and `map.js` (the capability map); `static/meshes/` holds the UR meshes for the mock |
 | `setup-machine.sh` | the once-only sudo steps for a fresh Ubuntu 22.04 computer |
 | `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on (`sim`, `real`, `stop`) |
-| `desktop_tools.py` | the tool buttons: the fixed list of programs the console may open |
 | `robot_link.py` | the robot-connection ladder: the checks, the actions, the `robot_status` tool |
-| `voice.py` | the link to the voice app: its event stream, the word tests ("stop", "confirm", "no, …"), say/play/follow-up, the proxied requests |
-| `voice_app/` | the voice app itself: wake word, speech-to-text, speaking back; its own venv, settings, tests and docs (`voice_app/README.md`) |
+| `voice/` | the voice front end: `words.py`, `audio.py`, `stages.py`, `pipeline.py`, `speech.py`, `models.py`, and the `Voice` object in `__init__.py` |
+| `models/` | the speech models (git-ignored) and the wake word `truffles.onnx` (committed) |
 | `examples/` | the description file and the start scripts for the Strathclyde UR12e cell |
-| `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator; `tests/mock_console.py` serves the pages with scripted answers for page work on a Mac (`--voice URL` adds a real voice app) |
+| `tests/` | `./venv/bin/python -m pytest` (no robot needed; `tests/README.md` for the Mac's Docker run); `tests/sim/` has helpers for the simulator; `tests/clips/` three speech clips; `tests/mock_console.py` serves the page with scripted answers for page work on a Mac (`--voice` runs the voice package too) |
 
 ## Attribution and citing
 

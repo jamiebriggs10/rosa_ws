@@ -1,5 +1,16 @@
+# The console (one program): the agent, the page, and the voice package. Pins are what resolved
+# on the lab PC (Python 3.10, 2026-10-22) and on the Mac (Python 3.11, 2026-10-28).
 jpl-rosa==1.0.10
 langchain-ollama==0.3.10
 flask==3.1.*
 pyyaml>=6.0
 pytest>=8
+# voice/: the microphone, the wake word, speech-to-text and Rosa's voice
+numpy==2.2.6
+sounddevice==0.5.6           # the microphone and the speaker (PortAudio: apt install libportaudio2)
+soxr==1.1.0                  # resampling the microphone's rate to 16 kHz
+soundfile==0.14.0            # WAV files (libsndfile: apt install libsndfile1)
+onnxruntime>=1.20            # Silero VAD and openWakeWord; the lab PC swaps in onnxruntime-gpu by hand
+openwakeword==0.6.0          # the wake word "truffles" (models/truffles.onnx)
+sherpa-onnx==1.13.8          # Parakeet speech-to-text, int8, CPU or CUDA
+piper-tts==1.8.0             # Rosa's voice; GPL-3.0, cited in the dissertation

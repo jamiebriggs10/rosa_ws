@@ -70,7 +70,7 @@ base_packages() {
   # The tools every later step and install.sh rely on: git to clone, curl to fetch installers,
   # tmux so the robot software outlives a closed terminal, Python's venv and pip for the agent,
   # build-essential for anything that compiles, net-tools for the usual network commands.
-  apt_install git curl tmux python3-pip python3-venv build-essential net-tools
+  apt_install git curl tmux python3-pip python3-venv build-essential net-tools libportaudio2 libsndfile1   # the last two: the microphone and WAV files (voice/)
 }
 
 hwe_kernel() {
