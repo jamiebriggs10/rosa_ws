@@ -1,6 +1,6 @@
 """Web console: a browser page that replaces the terminal for the ROSA agent.
 
-Run on the ZenBook, open from the Mac at http://<zenbook-ip>:8000.
+Runs on the robot's computer; open http://localhost:8000 there, or its address from any machine.
 
 One Flask app, one page (static/stage.html), and these JSON endpoints:
   GET  /state    everything the page shows, polled once a second
@@ -12,26 +12,21 @@ One Flask app, one page (static/stage.html), and these JSON endpoints:
   POST /cancel   stop the model thinking about the current command
   POST /reset    start a new conversation: the model forgets earlier messages
   POST /limits   {"MAX_STEP_CM": ..., ...}  change the safety limits, within config's ceilings
-  POST /rerun    {"tool", "args", "start_cm", "from_start"}  run a move again, without the model
-  POST /save     {"name", "tool", "args", "start_cm"}  keep a move in the saved list (a file)
-  POST /unsave   {"index": ...}  remove one from the saved list
   POST /confirm  {"id": ..., "ok": true|false}  answer the operator gate
   POST /stop     cancel the motion in progress, without the model
   POST /finish   write the session file and return the table
   GET  /capabilities         what the robot's system offers (discovery + the description file)
   POST /capabilities/rescan  read the graph and the description file again
   POST /ollama   {"url": ...}  test an Ollama address, save it, and list its models
-  GET  /tools              the tool buttons (RViz, rqt, a terminal, a bag recorder) and their state
-  POST /tools/<name>       open that tool on the console's own computer (404 unknown, 409 cannot run here)
-  POST /tools/<name>/stop  close it (SIGINT first, so a recording's bag file is closed properly)
   POST /robot/mode    {"mode": "sim"|"real"}  which robot the connection panel checks; saved, returns the ladder
   POST /robot/action  {"name": ...}  one step of the connection ladder (bring the profile up, start the
                       driver, power on; 404 unknown, 403 real-robot steps from another computer, 409 failed)
-  POST /voice/on       {"on": true|false}  the voice switch: spoken words become commands (saved, told to the voice app)
-  POST /voice/confirm  {"on": true|false}  let a spoken "yes" / "no" answer the confirm card (saved)
-  POST /voice/url      {"url": ...}  test the voice app's address, save it, reconnect to it
-  GET|POST /voice/<path>  passed on to the voice app (voice.py): options, settings, status, history, presets,
-                       presets/<name>, presets/<name>/load, ptt/down, ptt/up, help; 404 anything else, 502 not answering
+  POST /voice/on       {"on": true|false}  the voice switch: spoken words become commands (saved)
+  POST /voice/confirm  {"on": true|false}  let a spoken "confirm" / "no" answer the confirm card (saved)
+  POST /voice/ptt      {"down": true|false}  Hold to talk
+  POST /voice/say      {"text": ...}  Rosa says it (the Test voice button)
+  GET  /voice/devices  microphones, speakers and Piper voices for the Settings menus
+  POST /settings/voice {key: value, ...}  any key of the voice block, checked and saved
 """
 import datetime
 import json
