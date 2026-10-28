@@ -117,3 +117,23 @@ def test_mock_with_a_voice_unit_hears_a_clip(tmp_path):
     unit.start(); unit.wait(5)
     assert mock.messages and mock.messages[0]["via"] == "voice" and mock.messages[0]["text"].endswith("samples")
     assert app.test_client().get("/state").get_json()["voice"]["final"].endswith("samples")
+
+
+def test_mock_understands_loose_phrasings():
+    m = mock_console.Mock()
+    assert m.understand("raise the tool by three centimetres") == {"kind": "by", "dir": "up", "cm": 3}
+    assert m.understand("move the z axis up five") == {"kind": "by", "dir": "up", "cm": 5}
+    assert m.understand("lower it a bit")["dir"] == "down"
+    assert m.understand("go to x forty, y minus ten, z thirty") == {"kind": "to", "x": 40, "y": -10, "z": 30}
+    assert m.understand("move to x twenty y minus sixty") == {"kind": "to", "x": 20, "y": -60, "z": None}
+    assert m.understand("back to home")["kind"] == "home"
+
+
+def test_mock_asks_when_a_coordinate_is_missing_and_carries_on(client):
+    client.post("/command", json={"text": "go to x twenty, y minus sixty"})
+    wait_until(lambda: client.get("/state").get_json()["phase"] == "follow")
+    s = client.get("/state").get_json()
+    assert s["said"].endswith("?") and "z" in s["said"] and "78.5" in s["said"]
+    client.post("/command", json={"text": "keep it"})
+    wait_until(lambda: client.get("/state").get_json()["pending"])
+    assert client.get("/state").get_json()["pending"]["facts"]["to_cm"] == [20, -60, 78.5]

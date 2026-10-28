@@ -243,6 +243,12 @@ installed or started separately.
   never hears herself. One line per utterance goes to `sessions/voice-<date>.jsonl` with the
   felt delay (end of speech to text).
 - `voice/speech.py`: Rosa's voice (Piper, `models/piper/`) and the loop's sounds.
+- **Interrupting Rosa.** While she speaks the microphone is muted for speech-to-text, but the
+  wake word and Hold to talk still get through: say "truffles" (or press) over her line and she
+  stops at once and listens. **Questions.** When a request is incomplete ("go to x forty, y
+  minus ten"), the model asks one short question naming the current value ("Keep z at 78.5?"),
+  spoken and with the follow-up window open, so "keep it" or a number carries straight on;
+  `move_to` keeps any coordinate that is left out.
 - `voice/words.py`: what a phrase means. "stop" (alone) halts the arm without the model.
   Only **"confirm"** or **"go ahead"** answer a card; "no" or "cancel" declines it; "no,
   point eleven" declines it and runs the rest next, with one line of context; anything else

@@ -371,8 +371,9 @@ class Console:
         self.busy = False
         self._changed = False
         moved = any(e["tool"] in MOVE_TOOLS or e["outcome"] in ("stopped", "refused") for e in events)
-        if end in ("done", "refused", "stopped") and moved:
-            self.set_phase("follow")          # Rosa has just reported: the operator can answer without the wake word
+        asked = str(reply).strip().endswith("?")   # the model wants something cleared up
+        if (end in ("done", "refused", "stopped") and moved) or asked:
+            self.set_phase("follow")          # Rosa has just reported or asked: the operator can answer without the wake word
             self._open_follow_up()
         elif end == "cancelled":
             self.set_phase("follow")

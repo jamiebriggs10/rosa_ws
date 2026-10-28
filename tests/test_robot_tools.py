@@ -33,6 +33,7 @@ class FakeRobot:
         return self.pose
 
     def plan_line(self, targets):
+        self.last_target_cm = [round(getattr(targets[-1].position, a) * 100, 1) for a in "xyz"]
         return 1.0, trajectory()
 
     def plan_joints(self, target_deg):
@@ -93,3 +94,10 @@ def test_reports_failures_names_the_running_tool(fake_robot, monkeypatch):
     robot_tools.move_by.invoke({"dx": 1, "dy": 0, "dz": 0})
     assert got["tool"] == "move_by"
     assert robot_tools.events[-1]["tool"] == "move_by" and robot_tools.events[-1]["outcome"] == "cancelled"
+
+
+def test_move_to_keeps_a_coordinate_that_is_left_out(fake_robot, monkeypatch):
+    monkeypatch.setattr(robot_tools, "_confirm_handler", lambda what, preview=None: True)
+    robot_tools.move_to.invoke({"x": 20.0, "y": -10.0})          # no z: it stays where it is
+    assert fake_robot.last_target_cm == [20.0, -10.0, round(robot_tools._cm(fake_robot.tool_pose())[2], 1)]
+    assert "z" in robot_tools.move_to.description and "keep" in robot_tools.move_to.description.lower()

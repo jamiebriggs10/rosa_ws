@@ -114,17 +114,22 @@ def test_say_mutes_the_pipeline_while_speaking(tmp_path):
 
 
 class HoldSource:
-    """Frames on demand: yields `first`, then waits for go() before yielding `rest`, then ends."""
+    """Frames on demand: yields `first`, then waits for go() before yielding `rest`, then ends.
+    With `silence_while_waiting` it keeps yielding silent frames meanwhile, as a microphone would
+    (the pipeline only handles commands between frames)."""
     kind = "test"
-    def __init__(self, first, rest):
+    def __init__(self, first, rest, silence_while_waiting=False):
         self.first, self.rest, self._go, self._running = first, rest, threading.Event(), False
+        self.silence_while_waiting = silence_while_waiting
     def start(self): self._running = True
     def stop(self): self._running = False; self._go.set()
     def backlog(self): return 0
     def go(self): self._go.set()
     def frames(self):
         yield from self.first
-        self._go.wait(5)
+        while self._running and not self._go.wait(0.005 if self.silence_while_waiting else 5):
+            if self.silence_while_waiting:
+                yield np.zeros(512, np.float32)
         if self._running:
             yield from self.rest
 
@@ -165,4 +170,24 @@ def test_a_bad_microphone_can_be_corrected_from_the_settings(tmp_path):
     v.update({"input_device": "Jabra"})
     wait_until(lambda: v.latest["running"] and v.latest["error"] == "")
     assert opened == ["NoSuchMic", "Jabra"]
+    v.stop(); v.wait(5)
+
+
+def test_the_wake_word_hushes_rosa(tmp_path):
+    from voice.speech import Sounds, Speaker
+    def engine(text): return np.zeros(int(22050 * 0.3), np.float32), 22050
+    def player(samples, rate, stop): stop.wait(3)             # a long line, unless cancelled
+    src = HoldSource([], frames_of(("speech", 5), ("click", 1), ("speech", 31), ("silence", 31)), silence_while_waiting=True)
+    seen = Seen()
+    v = seen.voice(make_stages=fakes, make_source=lambda s: src, sessions_dir=tmp_path,
+                   make_speaker=lambda voice, on_speaking, out: (Speaker(engine, player, on_speaking=on_speaking), Sounds(player)))
+    v.start()
+    wait_until(lambda: v.latest["running"])
+    assert v.say("Point ten. Fourteen centimetres, six seconds, path clear. Confirm?")
+    wait_until(lambda: v.pipeline.muted)
+    t0 = time.time()
+    src.go()                                                   # "truffles, go home" over Rosa's line
+    wait_until(lambda: seen.finals)
+    assert time.time() - t0 < 2.5 and not v.latest["speaking"]  # she was cut off, not waited for
+    assert v.latest["interrupted"] is True
     v.stop(); v.wait(5)

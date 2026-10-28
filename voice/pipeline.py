@@ -37,7 +37,7 @@ class Pipeline:
         self._pending = []                          # requests waiting for the next idle moment
         self.state = IDLE
         self.wake_on = True
-        self.muted = False                          # while Rosa speaks: frames are dropped before any stage
+        self.muted = False                          # while Rosa speaks: frames reach only the trigger (barge-in)
         self.followup_until = 0.0                   # time.monotonic() until which no wake word is needed
         self._follow_utt = None
         self.frame_count = 0
@@ -148,7 +148,10 @@ class Pipeline:
         self.frame_count += 1
         if self.frame_count % 3 == 0:               # about ten level readings a second
             self.emit("level", {"rms": round(rms(frame), 4)})
-        if self.muted:
+        if self.muted:                              # Rosa is speaking: only the wake word and the button get through
+            if self.state == IDLE and self.trigger.process(frame):
+                self.emit("interrupt", {"by": self.trigger.last_fire})
+                self._on_trigger(self.trigger.last_fire)
             return
         self.preroll.append(frame)
         if self.state == IDLE:

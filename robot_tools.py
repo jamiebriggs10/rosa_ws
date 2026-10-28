@@ -451,10 +451,13 @@ def move_by(dx: float, dy: float, dz: float) -> str:
 
 @tool
 @_reports_failures
-def move_to(x: float, y: float, z: float) -> str:
+def move_to(x: float | None = None, y: float | None = None, z: float | None = None) -> str:
     """Move the robot's tool in a straight line to an ABSOLUTE position, in centimetres from the robot's base.
-    Use this only when the operator gives all three coordinates. z is height."""
-    return _move_line("move_to", {"x": x, "y": y, "z": z}, [x, y, z])
+    z is height. Leave out a coordinate to keep it as it is now (the operator said "x forty, y minus ten"
+    and agreed to keep z)."""
+    here = _cm(_get_robot().tool_pose())
+    target = [here[i] if v is None else float(v) for i, v in enumerate((x, y, z))]
+    return _move_line("move_to", {"x": target[0], "y": target[1], "z": target[2]}, target)
 
 
 @tool

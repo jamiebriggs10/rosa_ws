@@ -53,8 +53,14 @@ SPEED_CM_S, JOINT_DEG_S = 2.5, 3.5
 NUM = {w: i for i, w in enumerate(["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
                                    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
                                    "eighteen", "nineteen", "twenty"])}
-NUM.update(thirty=30, forty=40, fifty=50)
-N = r"(\d+(?:\.\d+)?|" + "|".join(NUM) + ")"
+NUM.update(thirty=30, forty=40, fifty=50, sixty=60, seventy=70, eighty=80, ninety=90, hundred=100)
+N = r"(\d+(?:\.\d+)?|" + "|".join(sorted(NUM, key=len, reverse=True)) + ")"     # longest first: "sixty" before "six"
+SIGNED = r"((?:minus|negative|-)\s*)?" + N                     # "minus ten", "-10"
+
+
+def signed(m_sign, m_num):
+    value = num(m_num, 0)
+    return -value if m_sign else value
 
 BASE_ROWS = [
     {"name": "/multiview_scan/capture", "kind": "service", "type": "std_srvs/srv/Trigger", "node": "multiview_scan",
@@ -310,6 +316,13 @@ class Mock:
     # -- the pretend model and robot ---------------------------------------------
     def understand(self, t):
         t = t.lower().replace(",", " ")
+        # an absolute position: "go to x forty, y minus ten, z thirty"; a coordinate may be missing
+        if re.search(r"\b(go|move|travel|head)\s+to\b", t) and re.search(r"\b[xyz]\s*" + SIGNED, t):
+            coords = {}
+            for axis in "xyz":
+                m = re.search(r"\b" + axis + r"\s*(?:=|at|of|is)?\s*" + SIGNED, t)
+                coords[axis] = signed(m.group(1), m.group(2)) if m else None
+            return {"kind": "to", **coords}
         m = re.search(r"\bpoint\s+" + N, t)
         if re.search(r"\b(show|see|read|display)\b.*\braster\b", t) or re.search(r"\braster\b.*\bpoints?\b", t):
             return {"kind": "raster"}
@@ -317,9 +330,14 @@ class Mock:
             return {"kind": "point", "n": int(num(m.group(1), 0))}
         if re.search(r"\b(home|rest)\b", t) and "where" not in t:
             return {"kind": "home"}
-        m = re.search(r"\b(up|down|left|right|forward|forwards|back|backwards)\b(?:\s+(?:by\s+)?" + N + ")?", t)
+        # a relative move, in many words: "up five", "raise it by three", "move the z axis up", "lower it a bit"
+        t2 = re.sub(r"\b(raise|lift|higher)\b", "up", t)
+        t2 = re.sub(r"\b(lower|drop)\b", "down", t2)
+        t2 = re.sub(r"\b(the\s+)?z[- ]axis\b", "", t2)
+        m = re.search(r"\b(up|down|left|right|forward|forwards|back|backwards)\b", t2)
         if m:
-            return {"kind": "by", "dir": m.group(1), "cm": num(m.group(2), 5)}
+            n = re.search(r"\b(?:by\s+)?" + N + r"\b", t2)
+            return {"kind": "by", "dir": m.group(1), "cm": num(n.group(1), 5) if n else (2 if re.search(r"\ba (bit|little|touch)\b", t2) else 5)}
         m = re.search(r"\bjoint\s+" + N + r"\b.*?" + N + r"\s*(?:degrees?|deg)?", t)
         if m:
             return {"kind": "joint", "j": int(num(m.group(1), 1)), "deg": num(m.group(2), 10)}
@@ -335,9 +353,26 @@ class Mock:
             return {"kind": "stop"}
         return None
 
+    _asked = None                                 # a move_to waiting for a missing coordinate
+
     def _run(self, text, run_id, via=None):
         self._via = via
         it = self.understand(text)
+        if self._asked and not it:                # the answer to "keep z at 78.5?"
+            asked, self._asked = self._asked, None
+            axis = next(a for a in "xyz" if asked[a] is None)
+            n = re.search(SIGNED, text.lower().replace(",", " "))
+            if re.search(r"\b(keep|yes|same|leave|as it is|ok|okay)\b", text.lower()):
+                asked[axis] = round(self.tool["xyz".index(axis)], 1)
+            elif n:
+                asked[axis] = signed(n.group(1), n.group(2))
+            it = asked if all(asked[a] is not None for a in "xyz") else None
+        if it and it["kind"] == "to" and any(it[a] is None for a in "xyz"):
+            self._asked = it
+            axis = next(a for a in "xyz" if it[a] is None)
+            question = f"Keep {axis} at {self.tool['xyz'.index(axis)]:.1f}?"
+            self._finish(text, [], question, "done", say=question, follow=True)
+            return
         self.set_phase("thinking")
         self.say("On it." if it and it["kind"] in ("point", "home", "by", "joint", "trigger") else "Let me check.")
         time.sleep(self.think_s)
@@ -382,7 +417,9 @@ class Mock:
             self._finish(text, events, f"Done: {it['label'].lower()}.", "done", say=f"Done: {it['label']}.", follow=it["moves"])
             return
         # a move: plan, propose, confirm, move
-        if kind == "point":
+        if kind == "to":
+            plan = self._plan_line([it["x"], it["y"], it["z"]], f"x {it['x']:g}, y {it['y']:g}, z {it['z']:g}", "move_to")
+        elif kind == "point":
             if not self.raster or not 1 <= it["n"] <= len(self.raster):
                 reply = f"The raster has {len(self.raster) if self.raster else 0} points; there is no point {it['n']}." if self.raster else "I haven't read a raster yet. Say \"show me the raster\" first."
                 self._finish(text, [], reply, "refused", say=reply)
@@ -515,7 +552,8 @@ class Mock:
     def _plan(self, end, label, tool, facts, points_cm):
         names = [n for n, _ in JOINTS]
         path = [[self.pose[n] + (end[n] - self.pose[n]) * k / 30 for n in names] for k in range(31)]
-        return {"tool": tool, "facts": facts, "path": path, "description": f"{label} ({facts['seconds']} s)",
+        return {"tool": tool, "facts": facts, "path": path,
+                "description": f"{label} ({facts['seconds']} s; mock: the ghost's joints are made up, the purple line is the plan)",
                 "preview": {"joints": names, "path_deg": path, "seconds": facts["seconds"], "points_cm": points_cm, "facts": facts}}
 
 

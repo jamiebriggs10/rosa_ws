@@ -34,7 +34,7 @@ class Voice:
         self._make_speaker = make_speaker or self._real_speaker
         self.sessions_dir = pathlib.Path(sessions_dir)
         self.latest = {"running": False, "state": "idle", "level": 0.0, "final": "", "action": "", "felt_ms": None,
-                       "error": "", "loading": "", "speaking": False, "followup_s": 0,
+                       "error": "", "loading": "", "speaking": False, "followup_s": 0, "interrupted": False,
                        "wake_on": bool(self.settings.get("on")), "speech_reason": "",
                        "devices": {"input": [], "output": []}}
         self.pipeline = None
@@ -176,6 +176,7 @@ class Voice:
         if self.speaker is None:
             self.latest["speech_reason"] = "voice is not running"
             return False
+        self.latest["interrupted"] = False
         spoken = self.speaker.say(text)
         self.latest["speech_reason"] = "" if spoken else self.speaker.reason
         return spoken
@@ -210,6 +211,10 @@ class Voice:
                 self._call(self.on_timings, latest["felt_ms"])
         elif kind == "followup":
             latest["followup_s"] = data["until_s"]
+        elif kind == "interrupt":                   # the wake word or the button while Rosa was speaking
+            latest["interrupted"] = True
+            if self.speaker is not None:
+                self.speaker.cancel()               # hushes her; on_speaking(False) lifts the mute
         elif kind == "error":
             latest["error"] = data["message"]
 

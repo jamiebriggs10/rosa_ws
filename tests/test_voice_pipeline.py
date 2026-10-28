@@ -160,11 +160,12 @@ def test_settings_change_waits_until_idle():
     assert done == [IDLE]                                               # applied between utterances, on the pipeline's thread
 
 
-def test_muted_frames_reach_no_stage():
+def test_muted_frames_reach_no_stage_but_the_trigger():
     pipe = make()
     pipe.set_muted(True)
     recs = run(pipe, frames_of(("click", 1), ("speech", 31), ("silence", 31)))
-    assert recs == [] and pipe.state == IDLE
+    # the wake word fired (barge-in), but the speech was never heard: the mute was never lifted
+    assert [r["outcome"] for r in recs] == ["no_speech"] and pipe.state == IDLE
     pipe.set_muted(False)
     assert len(run(pipe, frames_of(("click", 1), ("speech", 31), ("silence", 31)))) == 1
 
@@ -203,3 +204,22 @@ def test_followup_window_expires(monkeypatch):
     now[0] = 3.0
     recs = run(pipe, frames_of(("silence", 3), ("speech", 31), ("silence", 31)))
     assert recs == [] and pipe.state == IDLE and pipe.followup_s == 0
+
+
+def test_the_wake_word_interrupts_while_rosa_speaks():
+    """Muted (Rosa speaking), the VAD and speech-to-text hear nothing, but the wake word still fires:
+    the pipeline says "interrupt" and arms; once the mute lifts (Rosa hushed), the command is heard."""
+    events = []
+    pipe = make(events=events)
+    pipe.set_muted(True)
+    recs = run(pipe, frames_of(("speech", 5), ("click", 1), ("speech", 31), ("silence", 31)),
+               events=[(6 * FRAME_S, "mute_off")])          # Voice lifts the mute as soon as Rosa is hushed
+    assert [d for k, d in events if k == "interrupt"] == [{"by": "wake"}]
+    assert len(recs) == 1 and recs[0]["started_by"] == "wake" and recs[0]["final"] == f"{(3 + 28 + 10) * 512} samples"
+    assert [d["state"] for k, d in events if k == "state"][0] == ARMED
+
+
+def test_speech_while_muted_without_the_wake_word_is_dropped():
+    pipe = make()
+    pipe.set_muted(True)
+    assert run(pipe, frames_of(("speech", 31), ("silence", 31))) == [] and pipe.state == IDLE

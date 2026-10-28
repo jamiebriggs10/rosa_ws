@@ -895,3 +895,12 @@ def test_cancel_after_a_stop_does_not_silence_a_later_stopped_ending(client, voi
     client.post("/command", json={"text": "up five"})
     wait_until(lambda: not web_console.console.busy)
     assert any("part-way" in t for t in recorder.say_calls), recorder.say_calls
+
+
+def test_a_question_from_the_model_is_spoken_and_opens_the_follow_up_window(client, recorder):
+    client.agent.action = lambda: "Keep x at 15.7?"
+    client.post("/command", json={"text": "go to y minus ten, z thirty"})
+    wait_until(lambda: not web_console.console.busy)
+    s = client.get("/state").get_json()
+    assert s["phase"] == "follow" and s["follow_until_s"] > 0 and recorder.followup_calls[-1] > 0
+    assert recorder.say_calls[-1] == "Keep x at 15.7?"
