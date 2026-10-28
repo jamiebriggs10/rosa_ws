@@ -169,6 +169,8 @@ class Mock:
 
     def voice_idle(self):
         self.voice_stopped = False
+        if self.phase == "listening" and not self.busy:    # the window closed with nothing said
+            self.set_phase("idle")
 
     def _play(self, name):
         if self.link:

@@ -82,3 +82,11 @@ def test_heard_stop_no_and_a_held_correction():
     wait_until(lambda: m.pending and m.pending["facts"]["label"] == "Down 5 cm", timeout=10)
     assert m.heard("confirm") == "confirmed"
     wait_until(lambda: m.phase in ("done", "follow"), timeout=10)
+
+
+def test_listening_lamp_goes_back_to_idle_when_nothing_was_said():
+    m = mock_console.Mock(think_s=0.2)
+    m.voice_state("armed")
+    assert m.phase == "listening"
+    m.voice_idle()
+    assert m.phase == "idle"
