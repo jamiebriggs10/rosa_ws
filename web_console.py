@@ -46,7 +46,6 @@ from flask import Flask, jsonify, request, send_from_directory
 from langchain_core.messages import HumanMessage
 
 import config
-import desktop_tools
 import generic_tools
 import lines
 import robot_link
@@ -59,8 +58,7 @@ PHASES = ("idle", "listening", "heard", "thinking", "proposing", "moving", "done
 END_PHASE = {"done": "done", "no_motion": "done", "refused": "refused", "stopped": "stopped",
              "cancelled": "cancelled", "failed": "refused"}
 SESSIONS_DIR = pathlib.Path(__file__).parent / "sessions"
-SAVED_FILE = SESSIONS_DIR / "saved_moves.json"
-MOVE_TOOLS = {"move_by", "move_to", "move_path", "move_formula", "move_joint", "go_home"}   # the tools that can be re-run
+MOVE_TOOLS = {"move_by", "move_to", "move_path", "move_formula", "move_joint", "go_home"}   # the tools that move the arm
 
 app = Flask(__name__, static_folder="static")
 
@@ -82,7 +80,6 @@ class Console:
         self._answer = None
         self._answered = threading.Event()
         self.started = datetime.datetime.now()
-        self.saved = self._load_saved()       # moves kept for re-running, survive restarts
         self.voice_stopped = False            # a spoken "stop" has already stopped the arm for this utterance
         self._via = None                      # where the running command came from ("voice"), for its record
         # The loop (see PHASES). Each change is timestamped into the running command's record.
@@ -320,10 +317,6 @@ class Console:
         while latest.get("speaking") and time.time() - t0 < 20:
             time.sleep(0.05)
 
-    def rerun(self, label, tool, args):
-        """Run a move again straight through its tool: no model, but every safety check."""
-        return self._start(f"Run again: {label}", lambda: self._call_tool(tool, args), None)
-
     def _start(self, shown_text, work, command, via=None):
         with self._lock:
             if self.busy:
@@ -365,7 +358,7 @@ class Console:
         if threading.current_thread() is not self._current:
             return                            # the operator stopped this one; its answer is not wanted
         events = list(robot_tools.events)
-        self._remember_moves(events, by_model=command is not None)
+        self._remember_moves(events)
         total = round(time.time() - t0, 1)
         self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": total,
                               "command": command})
@@ -419,7 +412,7 @@ class Console:
         else:
             self._announce("done", kind="result", text=reply)
 
-    def _remember_moves(self, events, by_model):
+    def _remember_moves(self, events):
         """Add an exact record of what was done (tools, numbers or formulas, outcomes, positions)
         to the model's memory. Its own reply rarely says this, and without it the model cannot
         refer back to an earlier move, for example to retrace it.
@@ -428,7 +421,7 @@ class Console:
         words: small models copy whatever they appear to have said before, and were seen
         writing fake "record" lines claiming moves that never happened."""
         history = getattr(self._agent, "chat_history", None)
-        moves = [e for e in events if e["tool"] not in ("stop", "tool")]   # not the stop button or the tool buttons
+        moves = [e for e in events if e["tool"] != "stop"]                 # not the stop button
         if history is None or not moves:
             return
         lines = []
@@ -437,10 +430,9 @@ class Console:
             if e.get("start_cm"):
                 line += f", starting from {e['start_cm']} cm"
             lines.append(line + f". Result: {e['message']}")
-        who = "you called" if by_model else "the operator ran a move directly from the console, not through you:"
         history.append(HumanMessage(content=(
             f"(Console note, not from the operator. For your memory only; never repeat or imitate it. "
-            f"What actually happened, {who} " + " | ".join(lines) + ")")))
+            f"What actually happened, you called " + " | ".join(lines) + ")")))
 
     def cancel(self):
         """The Stop thinking button: give up on the current command. The model may still be
@@ -493,14 +485,6 @@ class Console:
         self._remember_settings()
         return None
 
-    def note_tool(self):
-        """A tool button was pressed: one line in the session table, like a limits change.
-        desktop_tools has just recorded the press in robot_tools.events, so the last one is it."""
-        event = robot_tools.events[-1]
-        self.records.append({"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
-                             "think": config.THINK, "command": f"({event['message']})", "events": [event],
-                             "total_s": 0, "reply": ""})
-
     def new_conversation(self):
         """Forget the conversation so far, e.g. after a string of failures has confused the model."""
         with self._lock:
@@ -533,27 +517,6 @@ class Console:
                               "answering, which is slower." if on else "Thinking is off.") + " Earlier messages are forgotten.",
                               "events": [], "total_s": 0})
         return True
-
-    # -- saved moves -----------------------------------------------------------
-    def _load_saved(self):
-        try:
-            return json.loads(SAVED_FILE.read_text())
-        except (OSError, ValueError):
-            return []
-
-    def _write_saved(self):
-        SESSIONS_DIR.mkdir(exist_ok=True)
-        SAVED_FILE.write_text(json.dumps(self.saved, indent=1))
-
-    def save(self, name, tool, args, start_cm):
-        self.saved.append({"name": name, "tool": tool, "args": args, "start_cm": start_cm,
-                           "model": config.MODEL, "saved": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")})
-        self._write_saved()
-
-    def unsave(self, index):
-        if 0 <= index < len(self.saved):
-            del self.saved[index]
-            self._write_saved()
 
     def switch_model(self, name):
         """Use another model from the next command on. Returns False while a command is running."""
@@ -842,16 +805,9 @@ voice_link = voice.VoiceLink(on_final=lambda text: console.heard(text), on_timin
 
 @app.get("/")
 def index():
-    return send_from_directory(app.static_folder, "index.html")
-
-
-@app.get("/stage")
-def stage():
-    """The hands-free page: one big panel, the loop, the map, every setting in one pop-up."""
     return send_from_directory(app.static_folder, "stage.html")
 
 
-# The stage's own settings: how much Rosa says, in whose words, and the two windows.
 VOICE_OUTPUT_SETTINGS = {
     "voice_verbosity": lambda v: v in (0, 1, 2) and not isinstance(v, bool),
     "voice_persona": lambda v: v in ("A", "B"),
@@ -887,10 +843,10 @@ def state():
                    confirm_timeout_s=config.CONFIRM_TIMEOUT_S, map_ros=config.MAP_ROS,
                    busy_for_s=round(time.time() - console.busy_since, 1) if console.busy else 0,
                    messages=console.messages, model=config.MODEL, think=config.THINK,
-                   pendant=config.PENDANT_URL, joint_list=config.JOINTS, saved=console.saved,
+                   joint_list=config.JOINTS,
                    limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED,
                    shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
-                   frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME}, tools=desktop_tools.rows(),
+                   frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME},
                    robot=robot_link.latest, local=_local(), voice=voice_state())
 
 
@@ -1031,89 +987,9 @@ def cancel():
     return jsonify(ok=True)
 
 
-def _shift_to_start(tool, args, start_cm):
-    """A move re-run "from its start": first go back to where it started, then do it,
-    all as one path. Only straight-line moves remember their start."""
-    here = robot_tools._cm(robot_tools._get_robot().tool_pose())
-    back = [round(s - h, 1) for s, h in zip(start_cm, here)]
-    if tool == "move_by":
-        points = [back, [b + d for b, d in zip(back, (args["dx"], args["dy"], args["dz"]))]]
-    elif tool in ("move_path", "move_formula"):
-        path = args["points"] if tool == "move_path" else robot_tools.evaluate_formula(args["formula"])
-        points = [back] + [[b + p for b, p in zip(back, point)] for point in path]
-    else:
-        return tool, args
-    return "move_path", {"points": points}
-
-
-@app.post("/rerun")
-def rerun():
-    body = request.json or {}
-    tool, args = body.get("tool"), body.get("args") or {}
-    if tool not in MOVE_TOOLS:
-        return jsonify(error="Only moves can be run again."), 400
-    label = body.get("name") or tool
-    if body.get("from_start") and body.get("start_cm"):
-        try:
-            tool, args = _shift_to_start(tool, args, body["start_cm"])
-        except (RuntimeError, ValueError) as exc:
-            return jsonify(error=str(exc)), 502
-        label += " (from its start)"
-    if not console.rerun(label, tool, args):
-        return jsonify(error="Wait for the current command to finish first."), 409
-    return jsonify(ok=True)
-
-
-@app.post("/save")
-def save():
-    body = request.json or {}
-    if body.get("tool") not in MOVE_TOOLS:
-        return jsonify(error="Only moves can be saved."), 400
-    console.save(body.get("name") or body["tool"], body["tool"], body.get("args") or {}, body.get("start_cm"))
-    return jsonify(ok=True)
-
-
-@app.post("/unsave")
-def unsave():
-    console.unsave(int((request.json or {}).get("index", -1)))
-    return jsonify(ok=True)
-
-
 @app.post("/stop")
 def stop():
     return jsonify(message=console.stop())
-
-
-# -- the tool buttons: only names cross the network, desktop_tools holds the commands --
-
-@app.get("/tools")
-def tools():
-    return jsonify(tools=desktop_tools.rows())
-
-
-@app.post("/tools/<name>")
-def start_tool(name):
-    if name not in desktop_tools.TOOLS:
-        return jsonify(error=f"There is no tool called {name}."), 404
-    if not desktop_tools.available(name):
-        return jsonify(error=desktop_tools.why_unavailable(name) or f"{name} cannot run here."), 409
-    try:
-        outcome = desktop_tools.start(name)
-    except (RuntimeError, OSError) as exc:          # OSError: the command vanished between the check and the start
-        return jsonify(error=str(exc)), 409
-    if outcome == "started":
-        console.note_tool()
-    return jsonify(ok=True, outcome=outcome, tools=desktop_tools.rows())
-
-
-@app.post("/tools/<name>/stop")
-def stop_tool(name):
-    if name not in desktop_tools.TOOLS:
-        return jsonify(error=f"There is no tool called {name}."), 404
-    stopped = desktop_tools.stop(name)
-    if stopped:
-        console.note_tool()
-    return jsonify(ok=True, stopped=stopped)
 
 
 # -- the robot connection panel: the ladder lives in robot_link, only names come from the page --

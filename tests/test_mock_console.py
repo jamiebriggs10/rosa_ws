@@ -27,7 +27,7 @@ def client():
 def test_state_and_pages(client):
     s = client.get("/state").get_json()
     assert s["phase"] == "idle" and s["status"]["tool_cm"] and s["limits"]["MAX_STEP_CM"] == 20
-    assert client.get("/").status_code == 200 and client.get("/stage").status_code == 200
+    assert client.get("/").status_code == 200 and client.get("/stage").status_code == 404
     assert client.get("/static/robot.urdf").status_code == 200
     assert client.get("/pkg/ur_description/meshes/ur10e/visual/base.dae").status_code == 200
     caps = client.get("/capabilities").get_json()["interfaces"]

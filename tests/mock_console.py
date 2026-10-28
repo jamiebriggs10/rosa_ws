@@ -203,9 +203,9 @@ class Mock:
         return {"status": {"ollama": True, "moveit": True, "joint_states": True, "joints": dict(self.pose),
                            "tool_cm": [round(v, 1) for v in self.tool], "hint": ""},
                 "busy": self.busy, "pending": self.pending, "busy_for_s": 0, "messages": self.messages, "model": self.model,
-                "think": self.think, "pendant": "", "joint_list": JOINTS, "saved": [], "limits": LIMITS, "ceilings": CEILINGS,
+                "think": self.think, "joint_list": JOINTS, "limits": LIMITS, "ceilings": CEILINGS,
                 "labels": LABELS, "speed": 0.1, "shown_path": self.shown_path, "ollama_url": "http://localhost:11434",
-                "frames": {"base": "base", "tool": "tool0"}, "tools": [], "local": True,
+                "frames": {"base": "base", "tool": "tool0"}, "local": True,
                 "voice": {**self.link.latest, **{k: self.voice[k] for k in ("on", "confirm", "url")}} if self.link else self.voice,
                 "robot": {"mode": "sim", "overall": {"lamp": "ok", "text": "ready (mock)"}, "alert": None,
                           "rungs": [{"title": "URSim answering", "detail": "mock", "lamp": "ok"}, {"title": "the driver", "detail": "mock", "lamp": "ok"}]},
@@ -535,10 +535,6 @@ def create_app(think_s=3.5, rows=0, voice_url=None):
 
     @app.get("/")
     def index():
-        return send_from_directory(STATIC, "index.html")
-
-    @app.get("/stage")
-    def stage():
         return send_from_directory(STATIC, "stage.html")
 
     @app.get("/pkg/<package>/<path:rel>")
@@ -617,10 +613,6 @@ def create_app(think_s=3.5, rows=0, voice_url=None):
     @app.post("/ollama")
     def ollama():
         return jsonify(ok=True, url=(request.json or {}).get("url", ""), models=["mock-model"])
-
-    @app.get("/tools")
-    def tools():
-        return jsonify([])
 
     @app.post("/robot/mode")
     def robot_mode():

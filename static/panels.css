@@ -19,12 +19,12 @@
 
 /* The safety limits bar and the tool buttons */
   /* The safety limits, always on show under the header, and the row of tool buttons under them */
-  .limits, .tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 16px;
+  .limits { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 16px;
     background: var(--panel); border-bottom: 1px solid var(--line); font-size: 13px; }
-  .limits .label, .tools .label { font-weight: 600; margin-right: 4px; }
+  .limits .label { font-weight: 600; margin-right: 4px; }
   .limits .chip { background: var(--bg); border-radius: 999px; padding: 2px 10px; }
   .limits .chip b { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; }
-  .limits button, .tools button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
+  .limits button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px;
     background: var(--panel); color: var(--ink); cursor: pointer; }
   .tools[hidden] { display: none; }
   .tools button.on { border-color: var(--ok); color: var(--ok); }     /* the tool is open or recording */

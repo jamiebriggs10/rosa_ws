@@ -1,8 +1,7 @@
-// The 3D view, shared by the workbench (index.html) and the stage (stage.html): the real robot
-// description posed from the live joint angles, an orange ghost that plays a plan, a purple
-// planned route, a teal path read from a topic, and the cell's keep-out shapes. It talks to a
-// page only through window.showLive/visualise/showRoute/clearRoute/showPath/clearPath/hideGhost/
-// lookAt and the elements "scene", "viewnote", "view-home" (and "view-sethome", "view-cell" if present).
+// The 3D view of the stage: the real robot description posed from the live joint angles, an
+// orange ghost that plays a plan, a purple planned route, a teal path read from a topic, and the
+// cell's keep-out shapes. It talks to the page only through window.showLive/visualise/showRoute/
+// clearRoute/showPath/clearPath/hideGhost/lookAt and the elements "scene", "viewnote", "view-home".
 // The 3D view: the real robot description, posed from the live joint angles.
 // The frame names come from config.py through /state, so nothing here names a robot.
 const frames = {base: "base", tool: "tool0"};
@@ -180,15 +179,7 @@ document.getElementById("view-home").onclick = () => {
   const home = savedHome();
   flyTo(new THREE.Vector3().fromArray(home.pos), new THREE.Vector3().fromArray(home.target));
 };
-if (document.getElementById("view-sethome")) document.getElementById("view-sethome").onclick = () => {
-  try {
-    localStorage.setItem("robot-console-home", JSON.stringify({pos: camera.position.toArray(), target: controls.target.toArray()}));
-    note.textContent = "This view is now your home view.";
-  } catch {
-    note.textContent = "This browser would not save the home view.";
-  }
-  setTimeout(() => { if (note.textContent.startsWith("This")) note.textContent = ""; }, 3000);
-};
+
 
 function resize() {
   const w = el.clientWidth, h = el.clientHeight;
@@ -312,13 +303,6 @@ async function loadCell() {
   }
   dirty = true;
 }
-if (document.getElementById("view-cell")) document.getElementById("view-cell").onclick = e => {
-  const show = e.target.getAttribute("aria-pressed") !== "true";
-  e.target.setAttribute("aria-pressed", String(show));
-  e.target.textContent = show ? "Hide cell" : "Show cell";
-  cellShapes.forEach(solid => { solid.visible = show; });
-  dirty = true;
-};
 
 window.hideGhost = () => { if (ghost && ghost.visible) { ghost.visible = false; dirty = true; } anim = null; if (!route) note.textContent = ""; };
 

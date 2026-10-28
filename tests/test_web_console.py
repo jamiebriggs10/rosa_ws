@@ -29,7 +29,6 @@ class FakeAgent:
 def client(monkeypatch, tmp_path):
     agent = FakeAgent()
     web_console.SESSIONS_DIR = tmp_path
-    monkeypatch.setattr(web_console, "SAVED_FILE", tmp_path / "saved.json")   # never touch the real saved moves
     monkeypatch.setattr(web_console.config, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(web_console.config, "MODEL", web_console.config.MODEL)
     monkeypatch.setattr(web_console.config, "THINK", web_console.config.THINK)
@@ -58,7 +57,8 @@ def wait_until(predicate, timeout=5):
 
 def test_state_has_the_shape_the_page_needs(client):
     body = client.get("/state").get_json()
-    assert set(body) >= {"status", "busy", "pending", "messages", "model", "pendant"}
+    assert set(body) >= {"status", "busy", "pending", "messages", "model"}
+    assert "saved" not in body and "tools" not in body and "pendant" not in body
     assert body["status"]["ollama"] is True
 
 
@@ -173,21 +173,6 @@ def test_think_switch_and_busy_timer(client):
     client.post("/think", json={"on": False})
 
 
-def test_saved_moves_persist_and_rerun_skips_the_model(client, monkeypatch, tmp_path):
-    client.post("/save", json={"name": "square", "tool": "move_path", "args": {"points": [[0, 5, 0]]}, "start_cm": [1, 2, 3]})
-    assert client.get("/state").get_json()["saved"][0]["name"] == "square"
-    assert "square" in (tmp_path / "saved.json").read_text()
-    called = {}
-    monkeypatch.setattr(web_console.Console, "_call_tool", lambda self, tool, args: called.update(tool=tool, args=args) or "ran")
-    assert client.post("/rerun", json={"name": "square", "tool": "move_path", "args": {"points": [[0, 5, 0]]}}).status_code == 200
-    wait_until(lambda: not web_console.console.busy)
-    assert called == {"tool": "move_path", "args": {"points": [[0, 5, 0]]}}
-    assert client.get("/state").get_json()["messages"][-2]["text"] == "Run again: square"
-    assert client.post("/rerun", json={"tool": "stop"}).status_code == 400
-    client.post("/unsave", json={"index": 0})
-    assert client.get("/state").get_json()["saved"] == []
-
-
 def test_new_conversation_forgets_the_agent(client):
     client.post("/command", json={"text": "hello"})
     wait_until(lambda: not web_console.console.busy)
@@ -213,11 +198,10 @@ def test_a_stopped_command_does_not_block_later_ones(client, monkeypatch):
     started.wait(1)
     client.post("/cancel")
     release.set(); time.sleep(0.2)
-    # many later re-runs, on fresh threads that may reuse the old id number, must still run
-    monkeypatch.setattr(web_console.Console, "_call_tool",
-                        lambda self, tool, args: robot_tools._reports_failures(lambda **kw: "ran")(**args))
+    # many later commands, on fresh threads that may reuse the old id number, must still run
+    client.agent.action = lambda: "ran"
     for _ in range(20):
-        client.post("/rerun", json={"tool": "move_by", "args": {"dx": 0, "dy": 0, "dz": 1}})
+        client.post("/command", json={"text": "up one"})
         wait_until(lambda: not web_console.console.busy)
         assert client.get("/state").get_json()["messages"][-1]["text"] == "ran"
 
@@ -236,13 +220,6 @@ def test_the_model_remembers_exactly_what_was_done(client, monkeypatch):
     memory = client.agent.chat_history[-1]
     assert isinstance(memory, HumanMessage), "the record must not look like the model's own words"
     assert "move_formula" in memory.content and "[[0, 0, t] for t in [1, 2]]" in memory.content and "[1, 2, 3]" in memory.content
-    # a re-run from the buttons is recorded too, as something the operator did
-    monkeypatch.setattr(web_console.Console, "_call_tool", lambda self, tool, args: robot_tools.events.append(
-        {"tool": tool, "args": args, "outcome": "done", "message": "Done."}) or "ran")
-    client.post("/rerun", json={"tool": "move_by", "args": {"dx": 0, "dy": 0, "dz": 2}})
-    wait_until(lambda: not web_console.console.busy)
-    last = client.agent.chat_history[-1].content
-    assert "operator ran a move directly" in last and "move_by" in last
 
 
 def test_limits_change_within_their_ceilings_and_are_announced(client, monkeypatch):
@@ -298,19 +275,6 @@ def test_state_carries_the_last_path(client, monkeypatch):
     assert client.get("/state").get_json()["shown_path"]["topic"] == "/p"
     client.post("/reset")
     assert client.get("/state").get_json()["shown_path"] is None
-
-
-def test_state_carries_tools_and_routes_refuse_unknown(client, monkeypatch):
-    tools = client.get("/state").get_json()["tools"]
-    assert [t["name"] for t in tools][:2] == ["rviz", "graph"]
-    assert set(tools[0]) == {"name", "label", "available", "running"}
-    r = client.post("/tools/nope")
-    assert r.status_code == 404 and "nope" in r.get_json()["error"]
-    monkeypatch.setattr(web_console.desktop_tools, "available", lambda name: False)
-    r = client.post("/tools/rviz")
-    assert r.status_code == 409 and r.get_json()["error"]
-    assert client.post("/tools/nope/stop").status_code == 404
-    assert client.post("/tools/rviz/stop").get_json() == {"ok": True, "stopped": False}   # it was never running
 
 
 # -- the robot connection panel -------------------------------------------------
@@ -905,9 +869,12 @@ def test_a_plain_question_still_goes_to_the_model(client, caps, recorder):
 
 # ---- the stage page and its settings pop-up ----
 
-def test_stage_page_is_served(client):
-    r = client.get("/stage")
-    assert r.status_code == 200 and b'id="settings"' in r.data and b"panels.js" in r.data and b"map.js" in r.data
+def test_the_stage_is_the_page(client):
+    r = client.get("/")
+    assert r.status_code == 200 and b'id="big"' in r.data and b"panels.js" in r.data and b"map.js" in r.data
+    assert client.get("/stage").status_code == 404
+    assert client.post("/rerun", json={}).status_code == 404 and client.post("/save", json={}).status_code == 404
+    assert client.get("/tools").status_code == 404
 
 
 def test_voice_output_settings_route_validates(client, monkeypatch):

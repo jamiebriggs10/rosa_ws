@@ -105,10 +105,6 @@ LIMIT_CEILINGS = {"MAX_STEP_CM": 50.0, "MAX_PATH_REACH_CM": 80.0, "MAX_JOINT_DEG
 
 # --- The web console ---------------------------------------------------------------
 
-# A link in the header to the robot's own screen, e.g. URSim's teach pendant
-# (tunnelled to the Mac by scripts/sim-up). Empty hides the link.
-PENDANT_URL = os.environ.get("PENDANT_URL", "http://localhost:6080/vnc.html")
-
 # --- The robot connection panel ----------------------------------------------------
 # Which ladder of checks the console shows and which start.sh mode its Start button uses:
 # "sim" (the simulator) or "real" (the arm on the cable). Switched on the page.
@@ -124,10 +120,6 @@ ROBOT_PORT = ""
 NETWORK_PROFILE = "robot"
 # Where URSim answers when the simulator is used.
 URSIM_IP = "192.168.56.101"
-
-# An RViz settings file (.rviz) for the console's RViz button, so it opens showing the
-# robot and the cell. Empty opens RViz with its defaults. Set as "rviz_config" in settings.
-RVIZ_CONFIG = ""
 
 # --- Voice control -----------------------------------------------------------------
 # Speech is handled by a separate program, the voice app (voice_app/ in this repo: wake
@@ -168,7 +160,7 @@ def load_settings(path=None):
 def apply_settings(settings):
     """Copy valid values from a settings dict onto this module. Bad values are ignored,
     so a damaged file can never stop the console from starting."""
-    global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES, RVIZ_CONFIG
+    global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES
     global ROBOT_MODE, ROBOT_IP, COMPUTER_IP, ROBOT_PORT, NETWORK_PROFILE, URSIM_IP
     global VOICE_URL, VOICE_ON, VOICE_CONFIRM, VOICE_VERBOSITY, VOICE_PERSONA, FOLLOW_UP_S, CONFIRM_TIMEOUT_S, MAP_ROS
     url = settings.get("ollama_url")
@@ -203,8 +195,6 @@ def apply_settings(settings):
         INTERFACES_FILE = pathlib.Path(settings["interfaces_file"]).expanduser()
     if isinstance(settings.get("workspaces"), list):
         WORKSPACES = [w for w in settings["workspaces"] if isinstance(w, str)]
-    if isinstance(settings.get("rviz_config"), str):
-        RVIZ_CONFIG = settings["rviz_config"]
     if settings.get("robot_mode") in ("sim", "real"):
         ROBOT_MODE = settings["robot_mode"]
     for key, name in (("robot_ip", "ROBOT_IP"), ("computer_ip", "COMPUTER_IP"), ("robot_port", "ROBOT_PORT"),

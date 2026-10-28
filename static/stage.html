@@ -100,7 +100,7 @@
   #settings .row label { display: flex; align-items: center; gap: 6px; }
   #settings .row select, #settings .row input[type=number] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
   #settings .note { color: var(--muted); font-size: 13px; }
-  #settings .limits, #settings .tools { border: none; padding: 6px 0; }
+  #settings .limits { border: none; padding: 6px 0; }
   #settings .caps { display: block; }
   #settings #messages-note { font-size: 13px; color: var(--muted); }
   #settings .robot-panel .head, #settings .voice-panel .head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 6px 0 8px; }
@@ -119,8 +119,7 @@
   <span class="chip" id="chip-robot">Robot · …</span>
   <span class="chip" id="chip-model">Model · …</span>
   <span class="chip" id="chip-voice">Voice · …</span>
-  <a class="btn" id="workbench-link" href="/" title="The full console: chat, saved moves, every panel on one page">Workbench</a>
-  <button id="open-settings" type="button" title="Model, safety limits, robot connection, voice, tools, what the system offers, session">Settings</button>
+  <button id="open-settings" type="button" title="Model, safety limits, robot connection, voice, what the system offers, session">Settings</button>
 </div>
 
 <main>
@@ -234,7 +233,6 @@
     </details>
     <details class="sect">
       <summary>Tools</summary>
-      <div class="tools" id="tools"><span id="tools-buttons"></span><a id="pendant" target="_blank" hidden>Open pendant</a></div>
       <p class="note">Open on the robot's computer's own screen only.</p>
     </details>
     <details class="sect caps help">
@@ -270,8 +268,6 @@
 <script>
 // The stage is drawn from /state four times a second and /capabilities every ten seconds. It holds
 // no state of its own beyond what it last drew; everything it shows the console already knows.
-try { localStorage.setItem("rosa-page", "stage"); } catch {}
-$("workbench-link").onclick = () => { try { localStorage.setItem("rosa-page", "workbench"); } catch {} };
 
 const PHASE_LAMP = {idle: "", listening: "listen", heard: "listen", thinking: "think", proposing: "ask", moving: "go",
                     done: "go", refused: "no", cancelled: "no", stopped: "no", follow: "follow"};
@@ -397,7 +393,8 @@ async function say(text) {
 $("form").onsubmit = e => { e.preventDefault(); say($("text").value); };
 $("btn-confirm").onclick = () => { if (pendingId) post("/confirm", {id: pendingId, ok: true}).then(refresh); };
 $("btn-no").onclick = () => { if (pendingId) post("/confirm", {id: pendingId, ok: false}).then(refresh); };
-$("stop-robot").onclick = () => post("/stop").then(refresh);
+// Stop halts the arm; if the model is still working on a command, it is given up too.
+$("stop-robot").onclick = () => post("/stop").then(() => lastState && lastState.busy ? fetch("/cancel", {method: "POST"}) : null).then(refresh);
 
 // The settings pop-up: the workbench's panels (panels.js) plus the stage's own four settings.
 $("open-settings").onclick = () => { $("settings").showModal(); loadVoiceSettings(); loadSpeechVoices(); };

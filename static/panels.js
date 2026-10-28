@@ -1,8 +1,6 @@
-// The settings panels, shared by the workbench (index.html) and the stage (stage.html): the
-// requests helper, the saved moves, the robot-connection widget and ladder, the voice switch and
-// the voice app's settings, the tool buttons, the safety limits, the session buttons, the model
-// menu, the Ollama address and the capabilities panel. Each renderer looks its elements up by id
-// and does nothing on a page that lacks them, so both pages load this one file.
+// The settings panels of the stage (stage.html): the requests helper, the robot-connection ladder,
+// the voice section, the safety limits, the session buttons, the model menu, the Ollama address and
+// the capabilities panel. Each renderer looks its elements up by id.
 const $ = id => document.getElementById(id);
 let lastState = null, ollamaFilled = false;
 
@@ -12,8 +10,6 @@ function panelsRefresh(s) {
   if (!ollamaFilled && s.ollama_url && $("ollama-url")) { $("ollama-url").value = s.ollama_url; ollamaFilled = true; }
   if ($("think")) { $("think").checked = s.think; $("think").disabled = s.busy || !modelThinks[s.model]; }
   showLimits(s);
-  showSaved(s.saved || []);
-  showTools(s.tools || [], !!s.pendant);
   if (s.robot) showRobot(s.robot, !!s.local);
   if (s.voice) showVoice(s.voice);
 }
@@ -28,38 +24,7 @@ async function post(url, body) {
 
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c])); }
 
-// ---- the saved moves list ----
-// The saved moves list, kept in a file on the robot computer so it survives restarts.
-let savedShown = "";
-function showSaved(saved) {
-  if (!$("saved-list")) return;
-  const key = JSON.stringify(saved);
-  if (key === savedShown) return;
-  savedShown = key;
-  $("saved-count").textContent = saved.length;
-  $("saved-list").innerHTML = saved.length ? "" : '<li><span class="what">Nothing saved yet. Press Save under a move in the chat.</span></li>';
-  saved.forEach((move, i) => {
-    const li = document.createElement("li");
-    li.innerHTML = `<span class="what">${esc(move.name)} <span class="mono">${esc(move.tool)}</span> <span>${esc(move.model || "")}, ${esc(move.saved || "")}</span></span>`;
-    const here = document.createElement("button"); here.textContent = "Run here";
-    here.title = "Do the same move starting from where the tool is now";
-    here.onclick = () => post("/rerun", move).then(refresh);
-    li.appendChild(here);
-    if (move.start_cm) {
-      const start = document.createElement("button"); start.textContent = "From its start";
-      start.title = `Go back to where it first started (${move.start_cm.join(", ")} cm), then do it`;
-      start.onclick = () => post("/rerun", {...move, from_start: true}).then(refresh);
-      li.appendChild(start);
-    }
-    const del = document.createElement("button"); del.textContent = "Delete";
-    del.onclick = () => post("/unsave", {index: i}).then(refresh);
-    li.appendChild(del);
-    $("saved-list").appendChild(li);
-  });
-}
-
-
-// ---- the robot-connection widget and dialog, voice, the tool buttons ----
+// ---- the robot-connection ladder and voice ----
 // The robot-connection widget and its dialog. The ladder comes from /state.robot (computed on the
 // server every few seconds); the dialog is redrawn only when it changes, so a poll never pulls a
 // button out from under a click. Actions post a name; the server decides what it may run.
@@ -67,10 +32,6 @@ let robotKey = null, robotMode = "sim", robotLocal = false, robotArmed = null, r
 const MODE_NAMES = {sim: "Simulator", real: "Real robot"};
 function showRobot(r, local) {
   robotMode = r.mode || robotMode; robotLocal = local;
-  if ($("robot-lamp")) {
-    $("robot-lamp").className = "lamp " + (r.overall ? r.overall.lamp : "");
-    $("robot-text").textContent = `${MODE_NAMES[robotMode] || "Robot"}: ${r.overall ? r.overall.text : "…"}`;
-  }
   if (!$("robot-ladder")) return;
   const key = JSON.stringify([r, local, robotArmed, robotMessage]);
   if (key === robotKey) return;
@@ -122,7 +83,6 @@ async function robotSetMode(mode) {
   await fetch("/robot/mode", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({mode})}).catch(() => {});
   robotKey = null; refresh();
 }
-if ($("robot-widget")) $("robot-widget").onclick = () => { robotMessage = ""; $("robot-dialog").showModal(); };
 if ($("robot-mode-sim")) $("robot-mode-sim").onclick = () => robotSetMode("sim");
 if ($("robot-mode-real")) $("robot-mode-real").onclick = () => robotSetMode("real");
 if ($("robot-recheck")) $("robot-recheck").onclick = () => robotSetMode(robotMode);
@@ -151,9 +111,8 @@ function voiceLampText(v) {
 function showVoice(v) {
   voiceOn = !!v.on;
   const [lamp, text] = voiceLampText(v);
-  if ($("voice-lamp")) { $("voice-lamp").className = "lamp " + lamp; $("voice-text").textContent = text; }
   if (!voiceUrlFilled && v.url && $("voice-url")) { $("voice-url").value = v.url; voiceUrlFilled = true; }
-  const dlg = $("voice-dialog") || $("settings");         // the workbench's pop-up, or the stage's settings
+  const dlg = $("settings");
   if (!dlg || !dlg.open) return;
   const key = JSON.stringify([v, voiceMessage]);
   if (key === voiceKey) return;
@@ -185,16 +144,6 @@ async function setVoice(on) {
   await post("/voice/on", {on});                             // the note (app not answering) shows in the dialog's alert
   refresh();
 }
-if ($("voice-toggle")) $("voice-toggle").onclick = () => setVoice(!voiceOn);
-if ($("voice-on-btn")) $("voice-on-btn").onclick = () => setVoice(true);
-if ($("voice-off-btn")) $("voice-off-btn").onclick = () => setVoice(false);
-if ($("voice-settings")) $("voice-settings").onclick = () => {
-  voiceKey = null; voiceMessage = "";
-  $("voice-dialog").showModal();
-  if (lastState && lastState.voice) showVoice(lastState.voice);
-  loadVoiceSettings();
-};
-
 // mk("div", {className: "x", on: {click: fn}}, child, ...) builds an element; text only, so no HTML injection.
 function mk(tag, attrs, ...kids) {
   const node = document.createElement(tag);
@@ -346,7 +295,7 @@ if (pttBtn) {
   pttBtn.addEventListener("pointerdown", e => { pttBtn.setPointerCapture(e.pointerId); ptt(true); });
   for (const ev of ["pointerup", "pointerleave", "pointercancel"]) pttBtn.addEventListener(ev, () => ptt(false));
   window.addEventListener("blur", () => ptt(false));
-  if ($("voice-dialog")) $("voice-dialog").addEventListener("close", () => ptt(false));
+  $("settings").addEventListener("close", () => ptt(false));
 }
 if ($("voice-url-form")) $("voice-url-form").onsubmit = async e => {
   e.preventDefault();
@@ -358,36 +307,6 @@ if ($("voice-url-form")) $("voice-url-form").onsubmit = async e => {
   if (r.ok) { voiceKey = null; setTimeout(loadVoiceSettings, 1500); }
 };
 if ($("voice-confirm")) $("voice-confirm").onchange = e => post("/voice/confirm", {on: e.target.checked}).then(() => { voiceKey = null; refresh(); });
-
-let toolsKey = null, toolHint = "", toolHintUntil = 0;
-function showTools(tools, pendant) {
-  const usable = tools.filter(t => t.available);
-  if ($("tools")) $("tools").hidden = usable.length === 0 && !pendant;
-  if (!$("tools-buttons")) return;
-  const key = JSON.stringify(tools);
-  if (key === toolsKey) return;
-  toolsKey = key;
-  const box = $("tools-buttons"); box.innerHTML = "";
-  for (const t of usable) {
-    const b = document.createElement("button"); b.type = "button"; b.dataset.tool = t.name;
-    const stops = t.name === "record" && t.running;
-    b.textContent = stops ? "Stop recording" : t.label;
-    if (t.running) { b.classList.add("on"); b.title = "running"; }
-    b.onclick = () => pressTool(t.name, stops);
-    box.appendChild(b);
-  }
-}
-async function pressTool(name, stop) {
-  let r;
-  try { r = await fetch(`/tools/${name}` + (stop ? "/stop" : ""), {method: "POST"}); } catch { return; }
-  if (!r.ok) {
-    const data = await r.json().catch(() => ({}));
-    toolHint = data.error || "Something went wrong"; toolHintUntil = Date.now() + 4000;
-    if ($("hint")) { $("hint").hidden = false; $("hint").textContent = toolHint; }
-  }
-  refresh();
-}
-
 
 // ---- the safety limits ----
 // The safety limits bar: what the safety layer currently allows, and a form to change it.
