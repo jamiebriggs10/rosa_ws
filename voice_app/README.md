@@ -85,8 +85,11 @@ Fixed phrases are cached under `cache/say/`.
 Voices: `python -m piper.download_voices en_GB-alan-medium --data-dir models/piper`
 (the British voices are alan, alba, aru, cori, jenny_dioco, northern_english_male, semaine,
 southern_english_female, vctk). Piper is `piper-tts` from OHF-Voice/piper1-gpl, GPL-3.0; the
-original rhasspy/piper (MIT) was archived in October 2025. On the Mac the wheel cannot find
-its espeak data (seen 2026-10-27), so the app stays silent there and says why in `/status`.
+original rhasspy/piper (MIT) was archived in October 2025. It works on the Mac in this
+Python 3.11 venv (checked 2026-10-28; an earlier try with the system Python 3.10 could not
+find its espeak data). Fetch a voice once: `./.venv/bin/python -m piper.download_voices
+en_GB-alan-medium --data-dir models/piper`; without one the app stays silent and says why
+in `/status`.
 
 ## Docs
 

@@ -3,4 +3,4 @@
 parakeet-mlx==0.5.3         # Parakeet on the Apple GPU (MLX)
 mlx==0.32.3
 # whisper.cpp server driver: `brew install whisper-cpp` (1.9.2, built with Metal)
-piper-tts==1.8.0            # speaking back (speech.py); GPL-3.0, cited in the dissertation   # NOTE: the macOS wheel cannot find its espeak data (2026-10-27): speech stays silent on the Mac
+piper-tts==1.8.0            # speaking back (speech.py); GPL-3.0, cited in the dissertation   # works on the Mac in the 3.11 venv (2026-10-28); needs a voice in models/piper

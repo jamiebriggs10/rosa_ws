@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """A scripted console for page work on the Mac: serves the real pages and scripts from static/
 with pretend answers, so the stage and the workbench can be worked on without ROS, a model, a
-robot or the voice app. It imports nothing from the console (the Mac has no rclpy) and it never
-runs on the lab PC.
+robot or a model. From the console it imports only voice.py, the link to the voice app, which is
+pure Python (the Mac has no rclpy); it never runs on the lab PC.
 
-    python3 tests/mock_console.py [--port 8002] [--rows 160] [--think 3.5]
+    python3 tests/mock_console.py [--port 8002] [--rows 160] [--think 3.5] [--voice http://127.0.0.1:8100]
+
+With --voice it talks to a real voice app, which runs natively on the Mac (cd voice_app &&
+.venv/bin/python app.py): spoken words arrive as commands, the sounds and the read-backs play,
+exactly as on the lab PC. Without it, the voice routes answer 502 and the pill says so.
 
 Then open http://localhost:8002/stage (or /). What it understands: "show me the raster (and its
 points)", "go to point N", "go home", "up/down/left/right/forward/back N", "joint N by D degrees",
@@ -18,6 +22,7 @@ import argparse
 import math
 import pathlib
 import re
+import sys
 import threading
 import time
 
@@ -25,6 +30,12 @@ from flask import Flask, jsonify, request, send_from_directory
 
 HERE = pathlib.Path(__file__).resolve().parent
 STATIC = HERE.parent / "static"
+sys.path.insert(0, str(HERE.parent))
+import voice as voicelink                     # noqa: E402  the console's end of the wire (pure Python)
+
+# The sound each phase makes (the same table as the console's _announce).
+PHASE_SOUNDS = {"listening": "listen", "heard": "heard", "thinking": "think", "proposing": "ask", "moving": "go",
+                "done": "done", "refused": "refused", "cancelled": "cancel", "stopped": "cancel"}
 MESHES = HERE.parent.parent / "mockups" / "stage" / "meshes"
 
 JOINTS = [["shoulder_pan_joint", "base"], ["shoulder_lift_joint", "shoulder"], ["elbow_joint", "elbow"],
@@ -105,13 +116,83 @@ class Mock:
         self._answer = threading.Event()
         self._ok = False
         self._run_id = 0
+        self.link = None                      # a real voice app, when --voice names one
+        self.voice_stopped = False
+
+    # -- the voice app, when there is one -------------------------------------------
+    def attach_voice(self, url):
+        self.voice["url"] = url.rstrip("/")
+        voicelink.config.VOICE_ON = self.voice["on"]       # the link syncs the console's switch from config
+        self.link = voicelink.VoiceLink(url=lambda: self.voice["url"], on_final=self.heard, on_state=self.voice_state,
+                                        on_idle=self.voice_idle, on_timings=lambda ms: self.voice.__setitem__("felt_ms", ms))
+        self.link.start_background()
+
+    def _wake_words(self):
+        extra = self.link.latest.get("wake_word") if self.link else None
+        return voicelink.WAKE_WORDS + ((extra,) if extra else ())
+
+    def heard(self, text):
+        """Spoken text, handled as the console's heard() does: only "stop" skips the model."""
+        text = voicelink.strip_wake(text, self._wake_words())
+        if not self.voice["on"]:
+            return "off"
+        if not text:
+            return "empty"
+        if voicelink.is_stop(text):
+            if self.voice_stopped:
+                return "swallowed"
+            self.voice_stopped = True
+            self.stop("Stopped by voice.")
+            return "stopped"
+        if not self.busy:
+            self.set_phase("heard")
+        else:
+            self._play("heard")
+        if self.pending and self.voice["confirm"]:
+            if voicelink.says_yes(text) and self.answer(self.pending["id"], True):
+                return "confirmed"
+            rest = voicelink.split_no(text)
+            rest = text if rest is None else rest
+            self.held = rest or None          # set before the answer wakes the run, which reads it
+            if self.answer(self.pending["id"], False):
+                return "held" if rest else "cancelled"
+            self.held = None
+        if self.command(text, via="voice"):
+            return "sent"
+        self.messages.append({"who": "robot", "text": f"Heard “{text}” but a command is running. Say it again when it has finished.",
+                              "events": [], "total_s": 0})
+        return "busy"
+
+    def voice_state(self, state):
+        if state in ("armed", "listening") and not self.busy and self.phase != "listening":
+            self.set_phase("listening")
+
+    def voice_idle(self):
+        self.voice_stopped = False
+
+    def _play(self, name):
+        if self.link:
+            self.link.play(name)
+
+    def stop(self, note="Stop sent to the arm (mock)."):
+        if self.pending:
+            self.answer(self.pending["id"], False)
+        self.stop_flag = self.phase == "moving"
+        self.set_phase("stopped")
+        self.say("Stopped.")
+        self.messages.append({"who": "robot", "text": note, "events": [], "total_s": 0})
+        return note
 
     # -- the loop --------------------------------------------------------------
     def set_phase(self, p):
+        if p != self.phase and p in PHASE_SOUNDS:
+            self._play(PHASE_SOUNDS[p])
         self.phase, self.phase_since = p, time.time()
 
     def say(self, text):
         self.said = text
+        if self.link:
+            self.link.say(text)
 
     def state(self):
         left = max(0.0, self.follow_until - time.time())
@@ -122,7 +203,8 @@ class Mock:
                 "busy": self.busy, "pending": self.pending, "busy_for_s": 0, "messages": self.messages, "model": self.model,
                 "think": self.think, "pendant": "", "joint_list": JOINTS, "saved": [], "limits": LIMITS, "ceilings": CEILINGS,
                 "labels": LABELS, "speed": 0.1, "shown_path": self.shown_path, "ollama_url": "http://localhost:11434",
-                "frames": {"base": "base", "tool": "tool0"}, "tools": [], "local": True, "voice": self.voice,
+                "frames": {"base": "base", "tool": "tool0"}, "tools": [], "local": True,
+                "voice": {**self.link.latest, **{k: self.voice[k] for k in ("on", "confirm", "url")}} if self.link else self.voice,
                 "robot": {"mode": "sim", "overall": {"lamp": "ok", "text": "ready (mock)"}, "alert": None,
                           "rungs": [{"title": "URSim answering", "detail": "mock", "lamp": "ok"}, {"title": "the driver", "detail": "mock", "lamp": "ok"}]},
                 "phase": self.phase, "phase_since_s": round(time.time() - self.phase_since, 1), "follow_until_s": round(left, 1),
@@ -143,8 +225,10 @@ class Mock:
             return True
         self.busy = True
         self.follow_until, self.lit, self.trace = 0.0, [], None
+        if self.link:
+            self.link.followup(0)
         self._run_id += 1
-        threading.Thread(target=self._run, args=(text, self._run_id), daemon=True).start()
+        threading.Thread(target=self._run, args=(text, self._run_id, via), daemon=True).start()
         return True
 
     def answer_text(self, text):
@@ -161,6 +245,8 @@ class Mock:
         if self.pending and self.pending["id"] == pid:
             self._ok = ok
             self._answer.set()
+            if self.link:
+                self.link.followup(0)
             return True
         return False
 
@@ -221,7 +307,10 @@ class Mock:
         self._open_follow_up()
 
     def _open_follow_up(self, seconds=None):
-        self.follow_until = time.time() + (self.settings["follow_up_s"] if seconds is None else seconds)
+        seconds = self.settings["follow_up_s"] if seconds is None else seconds
+        self.follow_until = time.time() + seconds
+        if self.link and seconds > 0:
+            self.link.followup(seconds)
 
     # -- the pretend model and robot ---------------------------------------------
     def understand(self, t):
@@ -251,7 +340,8 @@ class Mock:
             return {"kind": "stop"}
         return None
 
-    def _run(self, text, run_id):
+    def _run(self, text, run_id, via=None):
+        self._via = via
         it = self.understand(text)
         self.set_phase("thinking")
         self.say("On it." if it and it["kind"] in ("point", "home", "by", "joint", "trigger") else "Let me check.")
@@ -360,6 +450,7 @@ class Mock:
 
     stop_flag = False
     held_changed = False
+    _via = None
 
     def _ask(self, description, preview, line):
         self._answer.clear()
@@ -385,14 +476,14 @@ class Mock:
         if say:
             self.say(say)
         self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": round(self.think_s, 1), "command": text})
-        self.records.append({"time": time.strftime("%H:%M:%S"), "model": self.model, "think": False, "command": text, "via": "typed",
+        self.records.append({"time": time.strftime("%H:%M:%S"), "model": self.model, "think": False, "command": text, "via": self._via or "typed",
                              "events": events, "total_s": round(self.think_s, 1), "reply": reply, "phases": [], "timings": {}})
         self.busy = False
         self.trace = None
         if self.held:
             held, self.held = self.held, None
             self.held_changed = True
-            self.command(held)
+            self.command(held, via=self._via)
             return
         if follow or end == "cancelled":
             self.set_phase("follow")
@@ -433,10 +524,12 @@ class Mock:
                 "preview": {"joints": names, "path_deg": path, "seconds": facts["seconds"], "points_cm": points_cm, "facts": facts}}
 
 
-def create_app(think_s=3.5, rows=0):
+def create_app(think_s=3.5, rows=0, voice_url=None):
     app = Flask(__name__, static_folder=str(STATIC), static_url_path="/static")
     mock = Mock(think_s=think_s, rows=rows)
     app.config["mock"] = mock
+    if voice_url:
+        mock.attach_voice(voice_url)
 
     @app.get("/")
     def index():
@@ -483,13 +576,7 @@ def create_app(think_s=3.5, rows=0):
 
     @app.post("/stop")
     def stop():
-        if mock.pending:
-            mock.answer(mock.pending["id"], False)
-        mock.stop_flag = mock.phase == "moving"
-        mock.set_phase("stopped")
-        mock.say("Stopped.")
-        mock.messages.append({"who": "robot", "text": "Stop sent to the arm (mock).", "events": [], "total_s": 0})
-        return jsonify(ok=True, message="Stop sent to the arm (mock).")
+        return jsonify(ok=True, message=mock.stop())
 
     @app.post("/cancel")
     def cancel():
@@ -543,8 +630,9 @@ def create_app(think_s=3.5, rows=0):
 
     @app.post("/voice/on")
     def voice_on():
-        mock.voice["on"] = bool((request.json or {}).get("on"))
-        return jsonify(ok=True, on=mock.voice["on"], note=None)
+        mock.voice["on"] = voicelink.config.VOICE_ON = bool((request.json or {}).get("on"))
+        note = mock.link.set_on(mock.voice["on"]) if mock.link else None
+        return jsonify(ok=True, on=mock.voice["on"], note=note)
 
     @app.post("/voice/confirm")
     def voice_confirm():
@@ -553,11 +641,31 @@ def create_app(think_s=3.5, rows=0):
 
     @app.post("/voice/url")
     def voice_url():
-        return jsonify(error="The voice app is not answering (mock)."), 502
+        url = str((request.json or {}).get("url", "")).rstrip("/")
+        if not mock.link:
+            return jsonify(error="The voice app is not answering (mock: start me with --voice)."), 502
+        try:
+            status, body = mock.link.request("GET", "/status", base=url)
+        except voicelink.VoiceUnavailable as exc:
+            return jsonify(error=str(exc)), 502
+        if status != 200 or "state" not in body:
+            return jsonify(error=f"{url} answered, but it is not the voice app."), 400
+        mock.voice["url"] = url
+        mock.link.reconnect()
+        return jsonify(ok=True, url=url)
 
     @app.route("/voice/<path:sub>", methods=["GET", "POST"])
     def voice_proxy(sub):
-        return jsonify(error="The voice app is not answering (mock)."), 502
+        if not mock.link:
+            return jsonify(error="The voice app is not answering (mock: start me with --voice)."), 502
+        path = "/static/help.json" if sub == "help" else "/" + sub
+        if request.query_string:
+            path += "?" + request.query_string.decode()
+        try:
+            status, data = mock.link.request(request.method, path, request.get_json(silent=True) if request.method == "POST" else None)
+        except voicelink.VoiceUnavailable as exc:
+            return jsonify(error=str(exc)), 502
+        return jsonify(data), status
 
     @app.post("/settings/voice")
     def settings_voice():
@@ -579,6 +687,8 @@ if __name__ == "__main__":
     ap.add_argument("--port", type=int, default=8002)
     ap.add_argument("--rows", type=int, default=0, help="pad the capability list with this many undescribed interfaces")
     ap.add_argument("--think", type=float, default=3.5, help="the pretend model's think time, seconds")
+    ap.add_argument("--voice", metavar="URL", help="talk to a real voice app at this address, e.g. http://127.0.0.1:8100")
     args = ap.parse_args()
-    print(f"Mock console on http://localhost:{args.port}/stage (and / for the workbench). Nothing here is real.")
-    create_app(think_s=args.think, rows=args.rows).run(host="127.0.0.1", port=args.port, threaded=True)
+    print(f"Mock console on http://localhost:{args.port}/stage (and / for the workbench). Nothing here is real"
+          + (f", except the voice app at {args.voice}." if args.voice else "."))
+    create_app(think_s=args.think, rows=args.rows, voice_url=args.voice).run(host="127.0.0.1", port=args.port, threaded=True)

@@ -61,3 +61,24 @@ def test_no_rest_and_tour(client):
     assert client.get("/state").get_json()["said"]
     assert client.post("/settings/voice", json={"voice_verbosity": 2}).status_code == 200
     assert client.post("/settings/voice", json={"voice_verbosity": 9}).status_code == 400
+
+
+def test_heard_treats_spoken_words_as_the_console_does():
+    m = mock_console.Mock(think_s=0.2)
+    assert m.heard("truffles, go home") == "sent"           # the wake word is stripped, the command runs
+    wait_until(lambda: m.pending)
+    assert m.messages[0]["via"] == "voice" and m.phase == "proposing"
+    assert m.heard("go ahead") == "confirmed"
+    wait_until(lambda: m.phase in ("done", "follow"), timeout=10)
+    assert m.records[-1]["via"] == "voice"
+
+
+def test_heard_stop_no_and_a_held_correction():
+    m = mock_console.Mock(think_s=0.2)
+    assert m.heard("stop") == "stopped" and m.phase == "stopped"
+    m.heard("up five")
+    wait_until(lambda: m.pending)
+    assert m.heard("no, down five") == "held"
+    wait_until(lambda: m.pending and m.pending["facts"]["label"] == "Down 5 cm", timeout=10)
+    assert m.heard("confirm") == "confirmed"
+    wait_until(lambda: m.phase in ("done", "follow"), timeout=10)

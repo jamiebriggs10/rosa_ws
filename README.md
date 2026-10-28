@@ -222,6 +222,10 @@ connected to X", "which of these move the robot", "where did that go", "show / h
 
 For page work without ROS (on a Mac), `python3 tests/mock_console.py --rows 160` serves
 both pages with scripted answers; see the header of that file.
+Add `--voice http://127.0.0.1:8100` and the mock talks to a real voice app, which runs
+natively on the Mac (`cd voice_app && .venv/bin/python app.py`, started from your own
+Terminal so macOS lets it use the microphone): the wake word, the sounds, the read-backs and
+"confirm" then all work at home, with the pretend robot.
 
 ## Voice control
 
@@ -393,7 +397,7 @@ added the same way, one tool per type, never per node.
 | `voice.py` | the link to the voice app: its event stream, the word tests ("stop", "confirm", "no, …"), say/play/follow-up, the proxied requests |
 | `voice_app/` | the voice app itself: wake word, speech-to-text, speaking back; its own venv, settings, tests and docs (`voice_app/README.md`) |
 | `examples/` | the description file and the start scripts for the Strathclyde UR12e cell |
-| `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator; `tests/mock_console.py` serves the pages with scripted answers for page work on a Mac |
+| `tests/` | `./venv/bin/python -m pytest` (no robot needed); `tests/sim/` has helpers for the simulator; `tests/mock_console.py` serves the pages with scripted answers for page work on a Mac (`--voice URL` adds a real voice app) |
 
 ## Attribution and citing
 
