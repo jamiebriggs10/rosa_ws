@@ -36,7 +36,7 @@ import voice as voicelink                     # noqa: E402  the console's end of
 # The sound each phase makes (the same table as the console's _announce).
 PHASE_SOUNDS = {"listening": "listen", "heard": "heard", "thinking": "think", "proposing": "ask", "moving": "go",
                 "done": "done", "refused": "refused", "cancelled": "cancel", "stopped": "cancel"}
-MESHES = HERE.parent.parent / "mockups" / "stage" / "meshes"
+MESHES = STATIC / "meshes"                 # the UR meshes, kept in the repo for page work without ROS
 
 JOINTS = [["shoulder_pan_joint", "base"], ["shoulder_lift_joint", "shoulder"], ["elbow_joint", "elbow"],
           ["wrist_1_joint", "wrist 1"], ["wrist_2_joint", "wrist 2"], ["wrist_3_joint", "wrist 3"]]

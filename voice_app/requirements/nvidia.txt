@@ -1,7 +1,0 @@
-# Linux PC with NVIDIA GPU (later). Untested until the lab PC arrives.
-# Note: install onnxruntime-gpu INSTEAD of onnxruntime (pip uninstall onnxruntime first).
--r base.txt
-onnxruntime-gpu
-# sherpa-onnx CUDA build: check the sherpa-onnx docs for the right wheel (replaces the CPU one).
-# whisper.cpp server driver: build whisper.cpp with -DGGML_CUDA=1 and put whisper-server on PATH.
-piper-tts==1.8.0            # speaking back (speech.py); GPL-3.0, cited in the dissertation
