@@ -31,7 +31,7 @@ from flask import Flask, jsonify, request, send_from_directory
 HERE = pathlib.Path(__file__).resolve().parent
 STATIC = HERE.parent / "static"
 sys.path.insert(0, str(HERE.parent))
-import voice as voicelink                     # noqa: E402  the console's end of the wire (pure Python)
+from voice import words                      # noqa: E402  what a spoken phrase means (pure Python)
 
 # The sound each phase makes (the same table as the console's _announce).
 PHASE_SOUNDS = {"listening": "listen", "heard": "heard", "thinking": "think", "proposing": "ask", "moving": "go",
@@ -121,24 +121,20 @@ class Mock:
 
     # -- the voice app, when there is one -------------------------------------------
     def attach_voice(self, url):
-        self.voice["url"] = url.rstrip("/")
-        voicelink.config.VOICE_ON = self.voice["on"]       # the link syncs the console's switch from config
-        self.link = voicelink.VoiceLink(url=lambda: self.voice["url"], on_final=self.heard, on_state=self.voice_state,
-                                        on_idle=self.voice_idle, on_timings=lambda ms: self.voice.__setitem__("felt_ms", ms))
-        self.link.start_background()
+        raise NotImplementedError("the in-process voice comes with the one-program tidy-up (Task 8)")
 
     def _wake_words(self):
         extra = self.link.latest.get("wake_word") if self.link else None
-        return voicelink.WAKE_WORDS + ((extra,) if extra else ())
+        return words.WAKE_WORDS + ((extra,) if extra else ())
 
     def heard(self, text):
         """Spoken text, handled as the console's heard() does: only "stop" skips the model."""
-        text = voicelink.strip_wake(text, self._wake_words())
+        text = words.strip_wake(text, self._wake_words())
         if not self.voice["on"]:
             return "off"
         if not text:
             return "empty"
-        if voicelink.is_stop(text):
+        if words.is_stop(text):
             if self.voice_stopped:
                 return "swallowed"
             self.voice_stopped = True
@@ -149,9 +145,9 @@ class Mock:
         else:
             self._play("heard")
         if self.pending and self.voice["confirm"]:
-            if voicelink.says_yes(text) and self.answer(self.pending["id"], True):
+            if words.says_yes(text) and self.answer(self.pending["id"], True):
                 return "confirmed"
-            rest = voicelink.split_no(text)
+            rest = words.split_no(text)
             rest = text if rest is None else rest
             self.held = rest or None          # set before the answer wakes the run, which reads it
             if self.answer(self.pending["id"], False):
@@ -624,7 +620,7 @@ def create_app(think_s=3.5, rows=0, voice_url=None):
 
     @app.post("/voice/on")
     def voice_on():
-        mock.voice["on"] = voicelink.config.VOICE_ON = bool((request.json or {}).get("on"))
+        mock.voice["on"] = bool((request.json or {}).get("on"))
         note = mock.link.set_on(mock.voice["on"]) if mock.link else None
         return jsonify(ok=True, on=mock.voice["on"], note=note)
 
@@ -640,7 +636,7 @@ def create_app(think_s=3.5, rows=0, voice_url=None):
             return jsonify(error="The voice app is not answering (mock: start me with --voice)."), 502
         try:
             status, body = mock.link.request("GET", "/status", base=url)
-        except voicelink.VoiceUnavailable as exc:
+        except Exception as exc:
             return jsonify(error=str(exc)), 502
         if status != 200 or "state" not in body:
             return jsonify(error=f"{url} answered, but it is not the voice app."), 400
@@ -657,7 +653,7 @@ def create_app(think_s=3.5, rows=0, voice_url=None):
             path += "?" + request.query_string.decode()
         try:
             status, data = mock.link.request(request.method, path, request.get_json(silent=True) if request.method == "POST" else None)
-        except voicelink.VoiceUnavailable as exc:
+        except Exception as exc:
             return jsonify(error=str(exc)), 502
         return jsonify(data), status
 

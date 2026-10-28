@@ -39,7 +39,6 @@ import pathlib
 import re
 import threading
 import time
-import urllib.parse
 import urllib.request
 
 from flask import Flask, jsonify, request, send_from_directory
@@ -51,6 +50,7 @@ import lines
 import robot_link
 import robot_tools
 import voice
+from voice import words
 
 # The loop: one phase at a time, each shown by the page as a lamp and (later) a sound and a line.
 PHASES = ("idle", "listening", "heard", "thinking", "proposing", "moving", "done", "refused", "cancelled",
@@ -80,7 +80,6 @@ class Console:
         self._answer = None
         self._answered = threading.Event()
         self.started = datetime.datetime.now()
-        self.voice_stopped = False            # a spoken "stop" has already stopped the arm for this utterance
         self._via = None                      # where the running command came from ("voice"), for its record
         # The loop (see PHASES). Each change is timestamped into the running command's record.
         self.phase, self.phase_since = "idle", time.time()
@@ -109,14 +108,14 @@ class Console:
     def _announce(self, phase, **facts):
         """Every phase has a sound; by verbosity, a spoken line too. The words come from lines.py and
         the facts the console measured. All of it goes to the voice app and never blocks."""
-        v, persona = config.VOICE_VERBOSITY, config.VOICE_PERSONA
+        v, persona = config.VOICE["verbosity"], config.VOICE["persona"]
         sound, kind, level = {
             "listening": ("listen", None, 9), "heard": ("heard", None, 9), "thinking": ("think", "preface", 2),
             "proposing": ("ask", "propose", 1), "moving": ("go", None, 9), "done": ("done", "done", 1),
             "refused": ("refused", "refused", 1), "cancelled": ("cancel", "cancel", 2), "stopped": ("cancel", "stopped", 1),
         }.get(phase, (None, None, 9))
         if sound:
-            voice_link.play(sound)
+            voice_unit.play(sound)
         kind = facts.pop("kind", kind)
         if not kind or v < facts.pop("level", level):
             return
@@ -125,15 +124,15 @@ class Console:
         except (KeyError, IndexError):
             return
         self.said = text
-        voice_link.say(text)
+        voice_unit.say(text)
 
     def _open_follow_up(self, seconds=None):
         """Rosa has just addressed the operator: for a while, no wake word is needed."""
-        seconds = config.FOLLOW_UP_S if seconds is None else seconds
+        seconds = config.VOICE["follow_up_s"] if seconds is None else seconds
         if seconds <= 0:
             return
         self.follow_until = time.time() + seconds
-        voice_link.followup(seconds)
+        voice_unit.followup(seconds)
 
     def voice_timings(self, felt_ms):
         """The voice app's felt delay for the utterance it just finished: kept with that command's record."""
@@ -152,14 +151,14 @@ class Console:
         def back():
             if self.phase == ending and not self.busy and not self.pending:
                 self.set_phase("idle")
-        self._later = threading.Timer(config.FOLLOW_UP_S if after_s is None else after_s, back)
+        self._later = threading.Timer(config.VOICE["follow_up_s"] if after_s is None else after_s, back)
         self._later.daemon = True
         self._later.start()
 
     # -- the operator gate ---------------------------------------------------
     def ask_operator(self, description, preview=None):
         """Called from the agent thread by a tool. Blocks until the page answers, or the card
-        times out (config.CONFIRM_TIMEOUT_S), which counts as no."""
+        times out (config.VOICE["confirm_timeout_s"]), which counts as no."""
         facts = (preview or {}).get("facts") if isinstance(preview, dict) else None
         self._last_label = (facts or {}).get("label") or description[:40]
         if self.declined_run:                 # one "no" covers the whole run: no second card for the same command
@@ -168,8 +167,8 @@ class Console:
         self.pending = {"id": str(time.time()), "text": description, "preview": preview, "facts": facts}
         self.set_phase("proposing")
         self._announce("proposing", **self._proposal_facts(facts, description))
-        self._open_follow_up(config.CONFIRM_TIMEOUT_S)
-        answered = self._answered.wait(timeout=config.CONFIRM_TIMEOUT_S)
+        self._open_follow_up(config.VOICE["confirm_timeout_s"])
+        answered = self._answered.wait(timeout=config.VOICE["confirm_timeout_s"])
         self.pending = None
         if not answered:
             self.timed_out = self._last_label
@@ -196,7 +195,7 @@ class Console:
             self._answer = ok
             self.set_phase("moving" if ok else "cancelled")
             self._announce("moving" if ok else "cancelled")
-            voice_link.followup(0)            # answered (by a tap or a word): the card's window closes
+            voice_unit.followup(0)            # answered (by a tap or a word): the card's window closes
             if not ok:
                 self.declined_run = True
             self._answered.set()
@@ -228,7 +227,7 @@ class Console:
         except Exception as exc:
             self._say_one(f"I cannot read what the system offers: {exc}", text, via)
             return True
-        persona = config.VOICE_PERSONA
+        persona = config.VOICE["persona"]
         sentences = []
         if kind == "tour":
             group = find_group(rows, m.group("g")) if m.group("g") else None
@@ -264,7 +263,7 @@ class Console:
                     sentences.append((f"The last command used {last.get('tool')}.", []))
         elif kind == "ros":
             on = m.group("on").lower() == "show"
-            config.save_settings({"map_ros": on})
+            config.save_settings({"voice": {"map_ros": on}})
             sentences.append(("ROS names shown." if on else "ROS names hidden.", []))
         self._record_question(text, via, sentences[0][0] if sentences else "")
         threading.Thread(target=self._tour, args=(sentences, self._tour_id), daemon=True).start()
@@ -273,7 +272,7 @@ class Console:
     def _say_one(self, line, text, via):
         self._record_question(text, via, line)
         self.said = line
-        voice_link.say(line)
+        voice_unit.say(line)
         self.messages.append({"who": "robot", "text": line, "events": [], "total_s": 0})
 
     def _record_question(self, text, via, reply):
@@ -293,7 +292,7 @@ class Console:
             if self.busy or tour_id != self._tour_id:
                 break
             self.lit, self.said = list(ids), line
-            voice_link.say(line)
+            voice_unit.say(line)
             said.append(line)
             self._wait_said()
         if tour_id == self._tour_id:
@@ -304,7 +303,7 @@ class Console:
     def _wait_said(self):
         """Wait for the voice app to finish the line: it reports speaking on and off; without it,
         a fixed 1.8 s per sentence."""
-        latest = voice_link.latest
+        latest = voice_unit.latest
         t0 = time.time()
         if not latest.get("running"):
             time.sleep(1.8)
@@ -324,7 +323,7 @@ class Console:
             self.busy, self.busy_since = True, time.time()
         self._phases, self.declined_run, self.follow_until, self.lit, self.timed_out = [], False, 0.0, [], None
         self._tour_id += 1                    # a tour still talking stops here
-        voice_link.followup(0)                # and the voice app's follow-up window, if one was open, closes
+        voice_unit.followup(0)                # and the voice app's follow-up window, if one was open, closes
         self.set_phase("thinking")
         self._announce("thinking")
         message = {"who": "you", "text": shown_text}
@@ -536,7 +535,7 @@ class Console:
         if self.pending:                      # a card still showing is declined quietly: the stop is the news
             self._answer, self.declined_run = False, True
             self._answered.set()
-            voice_link.followup(0)
+            voice_unit.followup(0)
         message = robot_tools.stop.invoke({})
         self.set_phase("stopped")
         tool = (_cached_status() or {}).get("tool_cm")
@@ -551,68 +550,55 @@ class Console:
         return message
 
     # -- voice -----------------------------------------------------------------
-    def heard(self, text, partial=False):
-        """Spoken text from the voice app (voice.py). Works out what it means and returns one
-        word saying what was done, which the voice pop-up shows: off, empty, ignored, stopped,
-        swallowed, confirmed, cancelled, sent or busy. Only "stop" bypasses the model; every
-        other command goes the way typed text goes, through submit() and the tools' checks.
-        `partial` is live text while the person is still speaking: watched for "stop" only."""
-        text = voice.strip_wake(text, self._wake_words())      # "Truffles, confirm" is a confirm
-        if not config.VOICE_ON:
+    def heard(self, text):
+        """Spoken text from the voice package. Works out what it means and returns one word saying
+        what was done, which the pop-up shows: off, empty, stopped, confirmed, cancelled, held, sent
+        or busy. Only "stop" bypasses the model; every other command goes the way typed text goes,
+        through submit() and the tools' checks."""
+        text = words.strip_wake(text)                          # "Truffles, confirm" is a confirm
+        if not config.VOICE["on"]:
             return "off"
         if not text:
             return "empty"
-        if voice.is_stop(text):
-            if self.voice_stopped:
-                return "swallowed"             # the partial already stopped the arm for this utterance
-            self.voice_stopped = True
+        if words.is_stop(text):
             try:
                 self.stop(note="Stopped by voice.")
             except Exception as exc:           # no robot, or the stop topic is missing
                 self.messages.append({"who": "robot", "text": f"Stopped by voice, but the stop failed: {exc}",
                                       "events": [], "total_s": 0})
             return "stopped"
-        if partial:
-            if not self.busy and self.phase != "listening":
-                self.set_phase("listening")
-                self._announce("listening")
-            return "ignored"
         if not self.busy:
             self.set_phase("heard")
         self._announce("heard")
         pending = self.pending
-        if pending and config.VOICE_CONFIRM:
-            if voice.says_yes(text) and self.answer(pending["id"], True):
+        if pending and config.VOICE["confirm"]:
+            if words.says_yes(text) and self.answer(pending["id"], True):
                 return "confirmed"
-            rest = voice.split_no(text)
+            rest = words.split_no(text)
             if rest is None:
                 rest = text                   # anything that is not a yes cancels the card and is a new command
+            self.held = rest or None          # set before the answer wakes the run, which reads it
             if self.answer(pending["id"], False):
-                self.held = rest or None
                 return "held" if rest else "cancelled"
+            self.held = None
         if self.submit(text, via="voice"):
             return "sent"
         if self.pending:
             note = (f"Heard “{text}”, but a confirm card is waiting. Answer it on screen, or turn voice "
-                    "confirm on in the voice pop-up.")
+                    "confirm on in the settings.")
         else:
             note = f"Heard “{text}” but the model is still busy. Say it again when it has finished."
         self.messages.append({"who": "robot", "text": note, "events": [], "total_s": 0})
         return "busy"
 
-    def _wake_words(self):
-        return voice.WAKE_WORDS + ((voice_link.latest.get("wake_word"),) if voice_link.latest.get("wake_word") else ())
-
     def voice_state(self, state):
-        """The voice app is armed or listening: the lamp and the listen tone, once per utterance.
-        (Batch speech-to-text sends no partial text, so this is where listening comes from.)"""
+        """The voice package is armed or listening: the lamp and the listen tone, once per utterance."""
         if state in ("armed", "listening") and not self.busy and self.phase != "listening":
             self.set_phase("listening")
             self._announce("listening")
 
     def voice_idle(self):
-        """The voice app is back to idle: the next utterance may stop the arm again."""
-        self.voice_stopped = False
+        """The voice package is back to idle: a window that closed with nothing said releases the lamp."""
         if self.phase in ("listening", "heard") and not self.busy:
             self.set_phase("idle")
 
@@ -795,12 +781,12 @@ def package_file(package, rel):
 
 console = None   # set in main() or by the tests
 
-# The link to the voice app (voice.py). Its callbacks run on the link's own thread and look
-# `console` up when called, because the tests replace it.
-voice_link = voice.VoiceLink(on_final=lambda text: console.heard(text), on_timings=lambda ms: console.voice_timings(ms),
-                             on_state=lambda state: console.voice_state(state),
-                             on_partial=lambda text: console.heard(text, partial=True),
-                             on_idle=lambda: console.voice_idle())
+# The voice front end (voice/): the microphone, the wake word, speech-to-text and Rosa's voice, on
+# its own thread. Its callbacks look `console` up when called, because the tests replace it.
+voice_unit = voice.Voice(config.VOICE, on_final=lambda text: console.heard(text),
+                         on_timings=lambda ms: console.voice_timings(ms),
+                         on_state=lambda state: console.voice_state(state),
+                         on_idle=lambda: console.voice_idle())
 
 
 @app.get("/")
@@ -808,26 +794,16 @@ def index():
     return send_from_directory(app.static_folder, "stage.html")
 
 
-VOICE_OUTPUT_SETTINGS = {
-    "voice_verbosity": lambda v: v in (0, 1, 2) and not isinstance(v, bool),
-    "voice_persona": lambda v: v in ("A", "B"),
-    "follow_up_s": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 30,
-    "confirm_timeout_s": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and 5 <= v <= 120,
-    "map_ros": lambda v: isinstance(v, bool),
-}
-
-
 @app.post("/settings/voice")
-def voice_output_settings():
+def voice_settings():
+    """Any key of the voice block, checked, saved, and handed to the voice package."""
     body = request.json or {}
-    for key, value in body.items():
-        if key not in VOICE_OUTPUT_SETTINGS:
-            return jsonify(error=f"{key} is not one of the stage's settings."), 400
-        if not VOICE_OUTPUT_SETTINGS[key](value):
-            return jsonify(error=f"{key}: {value!r} is out of range."), 400
-    config.save_settings(body)
-    return jsonify(ok=True, verbosity=config.VOICE_VERBOSITY, persona=config.VOICE_PERSONA,
-                   follow_up_s=config.FOLLOW_UP_S, confirm_timeout_s=config.CONFIRM_TIMEOUT_S, map_ros=config.MAP_ROS)
+    problem = config.voice_settings_ok(body)
+    if problem:
+        return jsonify(error=problem), 400
+    config.save_settings({"voice": body})
+    voice_unit.update(body)
+    return jsonify(ok=True, voice=config.VOICE)
 
 
 @app.get("/state")
@@ -838,9 +814,9 @@ def state():
     return jsonify(status=_cached_status(), busy=console.busy, pending=console.pending,
                    phase=console.phase, phase_since_s=round(time.time() - console.phase_since, 1),
                    follow_until_s=round(follow_left, 1), trace=console_trace(), lit=console.lit,
-                   held=console.held, said=console.said, verbosity=config.VOICE_VERBOSITY,
-                   persona=config.VOICE_PERSONA, follow_up_s=config.FOLLOW_UP_S,
-                   confirm_timeout_s=config.CONFIRM_TIMEOUT_S, map_ros=config.MAP_ROS,
+                   held=console.held, said=console.said, verbosity=config.VOICE["verbosity"],
+                   persona=config.VOICE["persona"], follow_up_s=config.VOICE["follow_up_s"],
+                   confirm_timeout_s=config.VOICE["confirm_timeout_s"], map_ros=config.VOICE["map_ros"],
                    busy_for_s=round(time.time() - console.busy_since, 1) if console.busy else 0,
                    messages=console.messages, model=config.MODEL, think=config.THINK,
                    joint_list=config.JOINTS,
@@ -857,8 +833,8 @@ def console_trace():
 
 
 def voice_state():
-    """What the page shows about voice: the voice app's latest news plus the console's own settings."""
-    return {**voice_link.latest, "on": config.VOICE_ON, "confirm": config.VOICE_CONFIRM, "url": config.VOICE_URL}
+    """What the page shows about voice: the voice package's latest news plus the settings."""
+    return {**voice_unit.latest, **config.VOICE}
 
 
 def _local():
@@ -1029,55 +1005,37 @@ def finish():
 @app.post("/voice/on")
 def voice_on():
     on = bool((request.json or {}).get("on", False))
-    config.save_settings({"voice_on": on})
-    note = voice_link.set_on(on)              # a sentence when the voice app is not answering, else None
+    config.save_settings({"voice": {"on": on}})
+    voice_unit.set_wake(on)
     console.messages.append({"who": "robot", "text": "Voice control is on." if on else "Voice control is off.",
                              "events": [], "total_s": 0})
-    return jsonify(ok=True, on=on, note=note)
+    return jsonify(ok=True, on=on)
 
 
 @app.post("/voice/confirm")
 def voice_confirm():
-    config.save_settings({"voice_confirm": bool((request.json or {}).get("on", False))})
-    return jsonify(ok=True, confirm=config.VOICE_CONFIRM)
+    config.save_settings({"voice": {"confirm": bool((request.json or {}).get("on", False))}})
+    return jsonify(ok=True, confirm=config.VOICE["confirm"])
 
 
-@app.post("/voice/url")
-def voice_url():
-    url = (request.json or {}).get("url", "")
-    if not isinstance(url, str) or not url.startswith("http") or not urllib.parse.urlsplit(url).hostname:
-        return jsonify(error="The address must start with http://, e.g. http://127.0.0.1:8100"), 400
-    url = url.rstrip("/")
-    try:
-        status, body = voice_link.request("GET", "/status", base=url)
-    except voice.VoiceUnavailable as exc:
-        return jsonify(error=str(exc)), 502
-    if status != 200 or "state" not in body:   # something answered (Ollama? this console?), but not the voice app
-        return jsonify(error=f"{url} answered, but it is not the voice app."), 400
-    config.save_settings({"voice_url": url})
-    voice_link.reconnect()                    # the listening thread picks the new address up at once
-    return jsonify(ok=True, url=url)
+@app.post("/voice/ptt")
+def voice_ptt():
+    """Hold to talk: {"down": true} when the button goes down, false when it is let go."""
+    voice_unit.ptt(bool((request.json or {}).get("down", False)))
+    return jsonify(ok=True)
 
 
-# The voice app's pages the pop-up may use. /wake is not among them: the switch is the console's.
-VOICE_PROXIED = re.compile(r"options|settings|status|history|presets|presets/[\w-]+|presets/[\w-]+/load|ptt/(down|up)|help|say|play|followup")
+@app.post("/voice/say")
+def voice_say():
+    """The Test voice button."""
+    spoken = voice_unit.say(str((request.json or {}).get("text", "")).strip())
+    return jsonify(spoken=spoken, reason=voice_unit.latest.get("speech_reason", ""))
 
 
-@app.route("/voice/<path:sub>", methods=["GET", "POST"])
-def voice_proxy(sub):
-    """Pass a request on to the voice app, same method, body and query string, and hand its own
-    answer (status and JSON) straight back, so the page only ever talks to the console."""
-    if not VOICE_PROXIED.fullmatch(sub):
-        return jsonify(error=f"/voice/{sub} is not something the console passes on."), 404
-    path = "/static/help.json" if sub == "help" else "/" + sub
-    if request.query_string:
-        path += "?" + request.query_string.decode()
-    body = request.get_json(silent=True) if request.method == "POST" else None
-    try:
-        status, data = voice_link.request(request.method, path, body)
-    except voice.VoiceUnavailable as exc:
-        return jsonify(error=str(exc)), 502
-    return jsonify(data), status
+@app.get("/voice/devices")
+def voice_devices():
+    """Microphones, speakers and Piper voices, for the pop-up's menus."""
+    return jsonify(**voice_unit.latest.get("devices", {"input": [], "output": []}), voices=voice_unit.voices())
 
 
 def main():
@@ -1086,7 +1044,7 @@ def main():
     console = Console(build_agent, abort)
     print(f"Web console on http://0.0.0.0:8000, model {config.MODEL} at {config.OLLAMA_URL}")
     robot_link.start_background()             # the connection ladder, checked every few seconds
-    voice_link.start_background()             # listens to the voice app, if it is running
+    voice_unit.start()                        # the microphone, on its own thread
     app.run(host="0.0.0.0", port=8000, threaded=True)
 
 

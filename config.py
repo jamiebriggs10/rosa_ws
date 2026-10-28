@@ -121,18 +121,53 @@ NETWORK_PROFILE = "robot"
 # Where URSim answers when the simulator is used.
 URSIM_IP = "192.168.56.101"
 
-# --- Voice control -----------------------------------------------------------------
-# Speech is handled by a separate program, the voice app (voice_app/ in this repo: wake
-# word or push-to-talk, speech-to-text, and speaking back). It runs on the same computer
-# as the console and the console talks to it over HTTP (voice.py). All three are settings.
-VOICE_URL = "http://127.0.0.1:8100"   # where the voice app answers
-VOICE_ON = False                       # the header switch: whether spoken words become commands
-VOICE_CONFIRM = True                   # whether a spoken "confirm" / "no" may answer the confirm card
-VOICE_VERBOSITY = 1                    # 0 sounds only, 1 read-backs and results spoken, 2 everything (prefaces, cancels)
-VOICE_PERSONA = "A"                    # A the technician (terse), B the colleague (warmer); see lines.py
-FOLLOW_UP_S = 8.0                      # after Rosa addresses you, seconds during which no wake word is needed (0..30)
-CONFIRM_TIMEOUT_S = 20.0               # how long a confirm card waits for an answer before it is cancelled (5..120)
-MAP_ROS = False                        # the map shows ROS names and the undescribed interfaces
+# --- Voice ---------------------------------------------------------------------------
+# One block, "voice", in settings.json. The voice package (voice/) reads the microphone, the wake
+# word and the speech ones; the console reads the rest. apply_settings() checks every value.
+VOICE_DEFAULTS = {
+    "on": False,                     # the switch: whether spoken words become commands
+    "confirm": True,                 # whether a spoken "confirm" / "no" may answer the confirm card
+    "verbosity": 1,                  # 0 sounds only, 1 read-backs and results spoken, 2 everything
+    "persona": "A",                  # A the technician (terse), B the colleague (warmer); see lines.py
+    "follow_up_s": 8,                # after Rosa speaks, seconds during which no wake word is needed (0..30)
+    "confirm_timeout_s": 20,         # how long a confirm card waits before it is cancelled (5..120)
+    "map_ros": False,                # the map shows ROS names and the undescribed interfaces
+    "input_device": None,            # part of the microphone's name ("Jabra"), or None for the default
+    "output_device": None,           # part of the speaker's name, or None for the default
+    "wake_threshold": 0.5,           # the wake word fires at or above this score (0.1..0.9)
+    "silence_ms": 700,               # silence that ends a wake-word turn (300..1500)
+    "speech_voice": "en_GB-alan-medium",
+    "speech_enabled": True,
+    "sounds_enabled": True,
+}
+VOICE = dict(VOICE_DEFAULTS)
+
+_bool = lambda v: isinstance(v, bool)                                                   # noqa: E731
+_num = lambda lo, hi: lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and lo <= v <= hi   # noqa: E731
+_name = lambda v: v is None or (isinstance(v, str) and len(v) <= 80)                     # noqa: E731
+VOICE_CHECKS = {
+    "on": _bool, "confirm": _bool, "speech_enabled": _bool, "sounds_enabled": _bool, "map_ros": _bool,
+    "verbosity": lambda v: v in (0, 1, 2) and not isinstance(v, bool),
+    "persona": lambda v: v in ("A", "B"),
+    "follow_up_s": _num(0, 30), "confirm_timeout_s": _num(5, 120), "wake_threshold": _num(0.1, 0.9),
+    "silence_ms": lambda v: isinstance(v, int) and not isinstance(v, bool) and 300 <= v <= 1500,
+    "input_device": _name, "output_device": _name,
+    "speech_voice": lambda v: isinstance(v, str) and 0 < len(v) <= 80,
+}
+# The keys a settings.json from before 2026-10-28 used, and where they went.
+_OLD_VOICE_KEYS = {"voice_on": "on", "voice_confirm": "confirm", "voice_verbosity": "verbosity", "voice_persona": "persona",
+                   "follow_up_s": "follow_up_s", "confirm_timeout_s": "confirm_timeout_s", "map_ros": "map_ros"}
+_GONE_KEYS = ("voice_url", "voice_start", "rviz_config")
+
+
+def voice_settings_ok(changes):
+    """None when every key is a voice setting with a value in range, else one sentence saying which."""
+    for key, value in (changes or {}).items():
+        if key not in VOICE_CHECKS:
+            return f"{key} is not one of the voice settings."
+        if not VOICE_CHECKS[key](value):
+            return f"{key}: {value!r} is out of range."
+    return None
 
 
 def package_share(package):
@@ -149,12 +184,28 @@ def package_share(package):
 # --- Reading and writing the settings file ----------------------------------------
 
 def load_settings(path=None):
-    """The settings file as a dict, or {} if it is missing or unreadable."""
+    """The settings file as a dict, or {} if it is missing or unreadable. A file from before the
+    voice block (flat voice_* keys) is rewritten into the new shape once."""
+    path = path or SETTINGS_FILE
     try:
-        data = json.loads((path or SETTINGS_FILE).read_text())
-        return data if isinstance(data, dict) else {}
+        data = json.loads(path.read_text())
+        if not isinstance(data, dict):
+            return {}
     except (OSError, ValueError):
         return {}
+    if any(k in data for k in _OLD_VOICE_KEYS) or any(k in data for k in _GONE_KEYS):
+        voice = dict(data.get("voice") or {})
+        for old, new in _OLD_VOICE_KEYS.items():
+            if old in data:
+                voice.setdefault(new, data.pop(old))
+        for key in _GONE_KEYS:
+            data.pop(key, None)
+        data["voice"] = voice
+        try:
+            path.write_text(json.dumps(data, indent=2) + "\n")
+        except OSError:
+            pass
+    return data
 
 
 def apply_settings(settings):
@@ -162,29 +213,12 @@ def apply_settings(settings):
     so a damaged file can never stop the console from starting."""
     global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES
     global ROBOT_MODE, ROBOT_IP, COMPUTER_IP, ROBOT_PORT, NETWORK_PROFILE, URSIM_IP
-    global VOICE_URL, VOICE_ON, VOICE_CONFIRM, VOICE_VERBOSITY, VOICE_PERSONA, FOLLOW_UP_S, CONFIRM_TIMEOUT_S, MAP_ROS
     url = settings.get("ollama_url")
     if isinstance(url, str) and url.startswith("http"):
         OLLAMA_URL = url.rstrip("/")
-    url = settings.get("voice_url")
-    if isinstance(url, str) and url.startswith("http"):
-        VOICE_URL = url.rstrip("/")
-    if isinstance(settings.get("voice_on"), bool):
-        VOICE_ON = settings["voice_on"]
-    if isinstance(settings.get("voice_confirm"), bool):
-        VOICE_CONFIRM = settings["voice_confirm"]
-    if settings.get("voice_verbosity") in (0, 1, 2):
-        VOICE_VERBOSITY = settings["voice_verbosity"]
-    if settings.get("voice_persona") in ("A", "B"):
-        VOICE_PERSONA = settings["voice_persona"]
-    if isinstance(settings.get("follow_up_s"), (int, float)) and not isinstance(settings["follow_up_s"], bool) \
-            and 0 <= settings["follow_up_s"] <= 30:
-        FOLLOW_UP_S = float(settings["follow_up_s"])
-    if isinstance(settings.get("confirm_timeout_s"), (int, float)) and not isinstance(settings["confirm_timeout_s"], bool) \
-            and 5 <= settings["confirm_timeout_s"] <= 120:
-        CONFIRM_TIMEOUT_S = float(settings["confirm_timeout_s"])
-    if isinstance(settings.get("map_ros"), bool):
-        MAP_ROS = settings["map_ros"]
+    for key, value in (settings.get("voice") or {}).items():
+        if key in VOICE_CHECKS and VOICE_CHECKS[key](value):
+            VOICE[key] = value
     if isinstance(settings.get("model"), str) and settings["model"]:
         MODEL = settings["model"]
     if isinstance(settings.get("think"), bool):
@@ -210,7 +244,10 @@ def apply_settings(settings):
 def save_settings(changes, path=None):
     """Merge changes into the settings file and apply them. Returns the merged dict."""
     path = path or SETTINGS_FILE
-    merged = {**load_settings(path), **changes}
+    current = load_settings(path)
+    merged = {**current, **changes}
+    if isinstance(changes.get("voice"), dict):              # the voice block merges one level down
+        merged["voice"] = {**(current.get("voice") or {}), **changes["voice"]}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(merged, indent=2) + "\n")
     apply_settings(merged)

@@ -50,35 +50,43 @@ def test_save_merges_and_keeps_unknown_keys(tmp_path, monkeypatch):
     assert config.MODEL == "qwen3:8b"
 
 
-def test_voice_settings_are_applied_and_checked(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "VOICE_URL", "http://127.0.0.1:8100", raising=False)
-    monkeypatch.setattr(config, "VOICE_ON", False, raising=False)
-    monkeypatch.setattr(config, "VOICE_CONFIRM", False, raising=False)
-    f = tmp_path / "settings.json"
-    f.write_text(json.dumps({"voice_url": "http://10.0.0.2:8100/", "voice_on": True, "voice_confirm": "yes"}))
-    config.apply_settings(config.load_settings(f))
-    assert config.VOICE_URL == "http://10.0.0.2:8100"     # trailing slash dropped
-    assert config.VOICE_ON is True
-    assert config.VOICE_CONFIRM is False                    # a string is not a bool: ignored
-    f.write_text(json.dumps({"voice_url": "ten dot two"}))
-    config.apply_settings(config.load_settings(f))
-    assert config.VOICE_URL == "http://10.0.0.2:8100"      # not a web address: ignored
+def test_old_flat_voice_keys_are_migrated(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"voice_on": True, "voice_confirm": False, "voice_verbosity": 2, "voice_persona": "B",
+                                "follow_up_s": 5, "confirm_timeout_s": 30, "map_ros": True,
+                                "voice_url": "http://x", "voice_start": "y", "model": "m"}))
+    settings = config.load_settings(path)                     # migrates and rewrites the file
+    assert settings["voice"]["on"] is True and settings["voice"]["persona"] == "B" and settings["voice"]["follow_up_s"] == 5
+    assert "voice_on" not in settings and "voice_url" not in settings and "voice_start" not in settings
+    assert settings["model"] == "m" and json.loads(path.read_text()) == settings
 
 
-def test_voice_output_settings_are_applied_and_checked(tmp_path, monkeypatch):
-    for name, value in (("VOICE_VERBOSITY", 1), ("VOICE_PERSONA", "A"), ("FOLLOW_UP_S", 8.0), ("CONFIRM_TIMEOUT_S", 20.0)):
-        monkeypatch.setattr(config, name, value, raising=False)
+def test_voice_block_is_applied_and_checked(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "VOICE", dict(config.VOICE_DEFAULTS))
     f = tmp_path / "settings.json"
-    f.write_text(json.dumps({"voice_verbosity": 2, "voice_persona": "B", "follow_up_s": 31, "confirm_timeout_s": 4}))
+    f.write_text(json.dumps({"voice": {"on": True, "confirm": "yes", "verbosity": 2, "silence_ms": 900, "wake_threshold": 0.95,
+                                       "input_device": "Jabra", "follow_up_s": 31}}))
     config.apply_settings(config.load_settings(f))
-    assert config.VOICE_VERBOSITY == 2 and config.VOICE_PERSONA == "B"
-    assert config.FOLLOW_UP_S == 8.0 and config.CONFIRM_TIMEOUT_S == 20.0      # out of range: ignored
-    f.write_text(json.dumps({"voice_verbosity": 7, "voice_persona": "Z", "follow_up_s": 0, "confirm_timeout_s": 60}))
-    config.apply_settings(config.load_settings(f))
-    assert config.VOICE_VERBOSITY == 2 and config.VOICE_PERSONA == "B"
-    assert config.FOLLOW_UP_S == 0 and config.CONFIRM_TIMEOUT_S == 60.0
+    assert config.VOICE["on"] is True and config.VOICE["verbosity"] == 2 and config.VOICE["silence_ms"] == 900
+    assert config.VOICE["input_device"] == "Jabra"
+    assert config.VOICE["confirm"] is True                    # a string is not a bool: ignored
+    assert config.VOICE["wake_threshold"] == 0.5 and config.VOICE["follow_up_s"] == 8   # out of range: ignored
+
+
+def test_voice_settings_are_validated():
+    assert config.voice_settings_ok({"wake_threshold": 0.3, "silence_ms": 900, "persona": "B", "input_device": None}) is None
+    assert "silence_ms" in config.voice_settings_ok({"silence_ms": 100})
+    assert "verbosity" in config.voice_settings_ok({"verbosity": True})
+    assert "ollama_url" in config.voice_settings_ok({"ollama_url": "http://x"})
+
+
+def test_save_merges_the_voice_block_one_level_down(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "VOICE", dict(config.VOICE_DEFAULTS))
+    f = tmp_path / "settings.json"
+    config.save_settings({"voice": {"on": True}}, f)
+    merged = config.save_settings({"voice": {"silence_ms": 900}}, f)
+    assert merged["voice"] == {"on": True, "silence_ms": 900} and config.VOICE["on"] is True and config.VOICE["silence_ms"] == 900
 
 
 def test_voice_confirm_defaults_on():
-    import importlib, os
-    assert config.VOICE_CONFIRM is True or os.environ.get("ROSA_SETTINGS")   # the default, unless a file set it
+    assert config.VOICE_DEFAULTS["confirm"] is True

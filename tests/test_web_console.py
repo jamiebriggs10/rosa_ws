@@ -336,8 +336,8 @@ class FakeStop:
 
 @pytest.fixture
 def voice_on(monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_ON", True)
-    monkeypatch.setattr(web_console.config, "VOICE_CONFIRM", False)
+    monkeypatch.setitem(web_console.config.VOICE, "on", True)
+    monkeypatch.setitem(web_console.config.VOICE, "confirm", False)
     stop = FakeStop()
     monkeypatch.setattr(web_console.robot_tools, "stop", stop)
     return stop
@@ -358,7 +358,7 @@ def test_heard_ignores_empty_text(client, voice_on):
 
 
 def test_heard_is_ignored_when_voice_is_off(client, voice_on, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_ON", False)
+    monkeypatch.setitem(web_console.config.VOICE, "on", False)
     assert web_console.console.heard("move up") == "off"
     assert web_console.console.messages == []
 
@@ -369,20 +369,6 @@ def test_heard_stop_halts_without_the_model(client, voice_on):
     assert web_console.console.heard("Stop.") == "stopped"
     assert voice_on.calls == 1 and invoked == []
     assert web_console.console.messages[-1]["text"].startswith("Stopped by voice")
-
-
-def test_partial_stop_swallows_the_final(client, voice_on):
-    c = web_console.console
-    assert c.heard("stop", partial=True) == "stopped"
-    assert c.heard("stop") == "swallowed"                 # the final of the same utterance
-    assert voice_on.calls == 1
-    c.voice_idle()                                        # the voice app is back to idle: next utterance
-    assert c.heard("stop") == "stopped" and voice_on.calls == 2
-
-
-def test_partial_that_is_not_a_stop_does_nothing(client, voice_on):
-    assert web_console.console.heard("move", partial=True) == "ignored"
-    assert web_console.console.messages == []
 
 
 def test_heard_while_busy_adds_a_note_and_does_not_queue(client, voice_on):
@@ -414,7 +400,7 @@ def test_voice_confirm_answers_the_card_only_when_enabled(client, voice_on, monk
     wait_until(lambda: c.pending is not None)
     assert c.heard("yes") == "busy"                       # voice confirm is off: the card waits for a click
     assert "confirm card" in c.messages[-1]["text"]
-    monkeypatch.setattr(web_console.config, "VOICE_CONFIRM", True)
+    monkeypatch.setitem(web_console.config.VOICE, "confirm", True)
     assert c.heard("Yes.") == "held"                      # not a yes-word any more: cancels the card, runs as a command
     wait_until(lambda: outcome.get("confirmed") is False)
     wait_until(lambda: len(c.records) == 1 and c.pending, timeout=10)    # the held "Yes." ran as its own command
@@ -444,61 +430,50 @@ def test_session_table_has_a_via_column(client, voice_on):
 
 # -- voice: the routes the pop-up uses -----------------------------------------------
 
-def test_state_carries_voice(client, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
-    body = client.get("/state").get_json()
-    assert set(body["voice"]) >= {"running", "state", "partial", "final", "on", "confirm", "url"}
-    assert body["voice"]["url"] == "http://127.0.0.1:8100" and body["voice"]["running"] is False
-
-
-def test_voice_on_saves_and_tells_the_app(client, monkeypatch):
-    told = []
-    monkeypatch.setattr(web_console.voice_link, "set_on", lambda on: told.append(on))
-    monkeypatch.setattr(web_console.config, "VOICE_ON", False)
+def test_voice_on_saves_and_tells_the_voice(client, monkeypatch, recorder):
+    monkeypatch.setitem(web_console.config.VOICE, "on", False)
     r = client.post("/voice/on", json={"on": True})
-    assert r.status_code == 200 and r.get_json()["on"] is True and r.get_json()["note"] is None
-    assert web_console.config.VOICE_ON is True and web_console.config.load_settings()["voice_on"] is True
-    assert told == [True]
+    assert r.status_code == 200 and r.get_json()["on"] is True
+    assert web_console.config.VOICE["on"] is True and web_console.config.load_settings()["voice"]["on"] is True
+    assert recorder.wake_calls == [True]
     assert web_console.console.messages[-1]["text"] == "Voice control is on."
     client.post("/voice/on", json={"on": False})
-    assert web_console.console.messages[-1]["text"] == "Voice control is off." and told == [True, False]
+    assert web_console.console.messages[-1]["text"] == "Voice control is off." and recorder.wake_calls == [True, False]
 
 
-def test_voice_on_saves_even_when_the_app_is_unreachable(client, monkeypatch):
-    monkeypatch.setattr(web_console.voice_link, "set_on", lambda on: "The voice app is not answering at http://127.0.0.1:8100.")
-    monkeypatch.setattr(web_console.config, "VOICE_ON", False)
-    r = client.post("/voice/on", json={"on": True})
-    assert r.status_code == 200 and "not answering" in r.get_json()["note"]
-    assert web_console.config.VOICE_ON is True
+def test_voice_routes_ptt_say_devices_and_settings(client, recorder, monkeypatch):
+    monkeypatch.setitem(web_console.config.VOICE, "silence_ms", 700)
+    monkeypatch.setitem(web_console.config.VOICE, "wake_threshold", 0.5)
+    assert client.post("/voice/ptt", json={"down": True}).status_code == 200 and recorder.ptt_calls == [True]
+    assert client.post("/voice/say", json={"text": "hi"}).get_json()["spoken"] is True and recorder.say_calls == ["hi"]
+    assert client.get("/voice/devices").get_json() == {"input": ["Jabra"], "output": ["Jabra"], "voices": ["en_GB-alan-medium"]}
+    r = client.post("/settings/voice", json={"silence_ms": 900, "wake_threshold": 0.4})
+    assert r.status_code == 200 and recorder.updated == {"silence_ms": 900, "wake_threshold": 0.4}
+    assert web_console.config.VOICE["silence_ms"] == 900 and r.get_json()["voice"]["silence_ms"] == 900
+    assert web_console.config.load_settings()["voice"]["silence_ms"] == 900
+    assert client.post("/settings/voice", json={"silence_ms": 5}).status_code == 400
+    assert client.post("/settings/voice", json={"ollama_url": "http://x"}).status_code == 400
+    s = client.get("/state").get_json()
+    assert s["verbosity"] == web_console.config.VOICE["verbosity"] and s["confirm_timeout_s"] == web_console.config.VOICE["confirm_timeout_s"]
+
+
+def test_state_voice_merges_latest_and_settings(client, recorder):
+    v = client.get("/state").get_json()["voice"]
+    assert v["running"] is True and v["silence_ms"] == web_console.config.VOICE["silence_ms"] and "url" not in v
+    assert set(v) >= {"state", "final", "felt_ms", "error", "on", "confirm", "speech_voice"}
+
+
+def test_the_listening_lamp_returns_to_idle_when_nothing_was_said(client, voice_on, recorder):
+    web_console.console.voice_state("armed")
+    assert web_console.console.phase == "listening"
+    web_console.console.voice_idle()
+    assert web_console.console.phase == "idle"
 
 
 def test_voice_confirm_is_saved(client, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_CONFIRM", False)
+    monkeypatch.setitem(web_console.config.VOICE, "confirm", False)
     assert client.post("/voice/confirm", json={"on": True}).status_code == 200
-    assert web_console.config.VOICE_CONFIRM is True and web_console.config.load_settings()["voice_confirm"] is True
-
-
-def test_bad_voice_url_is_refused(client, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
-
-    def unreachable(method, path, body=None, timeout_s=3.0, base=None):
-        raise web_console.voice.VoiceUnavailable(f"The voice app is not answering at {base}.")
-    monkeypatch.setattr(web_console.voice_link, "request", unreachable)
-    assert client.post("/voice/url", json={"url": "ten dot two"}).status_code == 400
-    assert client.post("/voice/url", json={"url": "http"}).status_code == 400          # no host at all
-    r = client.post("/voice/url", json={"url": "http://10.0.0.2:8100"})
-    assert r.status_code == 502 and "not answering" in r.get_json()["error"]
-    assert web_console.config.VOICE_URL == "http://127.0.0.1:8100"
-
-
-def test_reachable_but_wrong_voice_url_is_refused(client, monkeypatch):
-    """Ollama or the console itself answer on their ports, but they are not the voice app."""
-    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
-    monkeypatch.setattr(web_console.voice_link, "request",
-                        lambda method, path, body=None, timeout_s=3.0, base=None: (404, {"error": "no such page"}))
-    r = client.post("/voice/url", json={"url": "http://127.0.0.1:11434"})
-    assert r.status_code == 400 and "not the voice app" in r.get_json()["error"]
-    assert web_console.config.VOICE_URL == "http://127.0.0.1:8100"
+    assert web_console.config.VOICE["confirm"] is True and web_console.config.load_settings()["voice"]["confirm"] is True
 
 
 def test_cancelled_spoken_command_keeps_its_via(client, voice_on):
@@ -514,47 +489,6 @@ def test_cancelled_spoken_command_keeps_its_via(client, voice_on):
     assert client.post("/cancel").status_code == 200
     assert web_console.console.records[-1]["via"] == "voice"
     release.set()
-
-
-def test_good_voice_url_is_saved_and_reconnects(client, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_URL", "http://127.0.0.1:8100")
-    asked, reconnected = [], []
-    monkeypatch.setattr(web_console.voice_link, "request",
-                        lambda method, path, body=None, timeout_s=3.0, base=None: asked.append((path, base)) or (200, {"state": "idle"}))
-    monkeypatch.setattr(web_console.voice_link, "reconnect", lambda: reconnected.append(1))
-    r = client.post("/voice/url", json={"url": "http://10.0.0.2:8100/"})
-    assert r.status_code == 200 and r.get_json()["url"] == "http://10.0.0.2:8100"
-    assert asked == [("/status", "http://10.0.0.2:8100")] and reconnected == [1]
-    assert web_console.config.VOICE_URL == "http://10.0.0.2:8100"
-    assert web_console.config.load_settings()["voice_url"] == "http://10.0.0.2:8100"
-
-
-def test_voice_proxy_forwards_allowed_paths_only(client, monkeypatch):
-    seen = []
-    monkeypatch.setattr(web_console.voice_link, "request",
-                        lambda method, path, body=None, timeout_s=3.0, base=None: seen.append((method, path, body)) or (200, {"ok": True}))
-    assert client.get("/voice/options").get_json() == {"ok": True}
-    assert client.post("/voice/presets/mine?overwrite=1").status_code == 200
-    assert client.post("/voice/settings", json={"vad": {"use": "webrtc"}}).status_code == 200
-    assert client.get("/voice/help").status_code == 200
-    assert seen == [("GET", "/options", None), ("POST", "/presets/mine?overwrite=1", None),
-                    ("POST", "/settings", {"vad": {"use": "webrtc"}}), ("GET", "/static/help.json", None)]
-    assert client.post("/voice/wake", json={"on": True}).status_code == 404     # the switch is the console's
-    assert client.get("/voice/../etc/passwd").status_code == 404
-    assert client.get("/voice/presets/mine/delete").status_code == 404
-
-
-def test_voice_proxy_passes_status_and_body_through(client, monkeypatch):
-    monkeypatch.setattr(web_console.voice_link, "request",
-                        lambda method, path, body=None, timeout_s=3.0, base=None: (409, {"error": "preset mine exists"}))
-    r = client.post("/voice/presets/mine")
-    assert r.status_code == 409 and r.get_json() == {"error": "preset mine exists"}
-
-    def unreachable(method, path, body=None, timeout_s=3.0, base=None):
-        raise web_console.voice.VoiceUnavailable("The voice app is not answering at http://127.0.0.1:8100.")
-    monkeypatch.setattr(web_console.voice_link, "request", unreachable)
-    r = client.get("/voice/status")
-    assert r.status_code == 502 and "not answering" in r.get_json()["error"]
 
 
 # ---- the loop: phases with timestamps, cached status, the new voice settings ----
@@ -616,7 +550,7 @@ def card_agent(client, label="Point 10"):
 
 @pytest.fixture
 def confirm_on(voice_on, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_CONFIRM", True)
+    monkeypatch.setitem(web_console.config.VOICE, "confirm", True)
     return voice_on
 
 
@@ -675,7 +609,7 @@ def test_any_other_utterance_cancels_the_card_and_runs(client, confirm_on):
 
 
 def test_card_timeout_is_cancelled_and_frees_the_console(client, confirm_on, monkeypatch):
-    monkeypatch.setattr(web_console.config, "CONFIRM_TIMEOUT_S", 0.2)
+    monkeypatch.setitem(web_console.config.VOICE, "confirm_timeout_s", 0.2)
     c = web_console.console
     card_agent(client)
     client.post("/command", json={"text": "go to point ten"})
@@ -687,7 +621,7 @@ def test_card_timeout_is_cancelled_and_frees_the_console(client, confirm_on, mon
 
 
 def test_voice_confirm_default_is_on():
-    assert web_console.config.VOICE_CONFIRM is True
+    assert web_console.config.VOICE["confirm"] is True
 
 
 def test_one_no_covers_the_run_with_a_click_too(client, voice_on):
@@ -708,28 +642,31 @@ def test_one_no_covers_the_run_with_a_click_too(client, voice_on):
 
 # ---- say, play, follow-up: every phase has a sound and, by verbosity, a line ----
 
-class RecordingLink:
-    """Stands in for voice.VoiceLink: keeps what the console asked the voice app to do."""
+class FakeVoice:
+    """Stands in for voice.Voice: keeps what the console asked of it."""
 
     def __init__(self):
         self.say_calls, self.play_calls, self.followup_calls, self.hushes = [], [], [], 0
-        self.latest = {"running": True, "speaking": False, "state": "idle"}
+        self.ptt_calls, self.wake_calls, self.updated = [], [], None
+        self.latest = {"running": True, "speaking": False, "state": "idle", "final": "", "felt_ms": None, "error": "",
+                       "speech_reason": "", "devices": {"input": ["Jabra"], "output": ["Jabra"]}}
 
-    def say(self, text): self.say_calls.append(text)
-    def play(self, name): self.play_calls.append(name)
+    def say(self, text): self.say_calls.append(text); return True
+    def play(self, name): self.play_calls.append(name); return True
     def followup(self, seconds): self.followup_calls.append(seconds)
     def hush(self): self.hushes += 1
-    def set_on(self, on): return None
-    def request(self, *a, **k): raise web_console.voice.VoiceUnavailable("fake")
-    def reconnect(self): pass
+    def ptt(self, down): self.ptt_calls.append(down)
+    def set_wake(self, on): self.wake_calls.append(on)
+    def update(self, settings): self.updated = settings
+    def voices(self): return ["en_GB-alan-medium"]
 
 
 @pytest.fixture
 def recorder(monkeypatch):
-    link = RecordingLink()
-    monkeypatch.setattr(web_console, "voice_link", link)
-    monkeypatch.setattr(web_console.config, "VOICE_VERBOSITY", 1)
-    monkeypatch.setattr(web_console.config, "VOICE_PERSONA", "A")
+    link = FakeVoice()
+    monkeypatch.setattr(web_console, "voice_unit", link)
+    monkeypatch.setitem(web_console.config.VOICE, "verbosity", 1)
+    monkeypatch.setitem(web_console.config.VOICE, "persona", "A")
     return link
 
 
@@ -754,7 +691,7 @@ def test_a_proposal_is_played_said_and_opens_a_follow_up(client, recorder):
 
 
 def test_verbosity_zero_plays_but_never_says(client, recorder, monkeypatch):
-    monkeypatch.setattr(web_console.config, "VOICE_VERBOSITY", 0)
+    monkeypatch.setitem(web_console.config.VOICE, "verbosity", 0)
     c = web_console.console
     line_agent(client, {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6})
     client.post("/command", json={"text": "go to point ten"})
@@ -789,7 +726,7 @@ def test_refusal_is_said_the_same_in_both_personas(client, recorder, monkeypatch
     c = web_console.console
     said = {}
     for persona in ("A", "B"):
-        monkeypatch.setattr(web_console.config, "VOICE_PERSONA", persona)
+        monkeypatch.setitem(web_console.config.VOICE, "persona", persona)
 
         def invoke(text):
             robot_tools.events.append({"tool": "move_by", "args": {}, "outcome": "refused", "message": "REFUSED by safety layer: too far. Nothing was moved."})
@@ -853,7 +790,7 @@ def test_which_move_the_robot_lists_the_movers(client, caps, recorder):
 
 
 def test_show_ros_is_saved_and_in_state(client, caps, recorder, monkeypatch):
-    monkeypatch.setattr(web_console.config, "MAP_ROS", False)
+    monkeypatch.setitem(web_console.config.VOICE, "map_ros", False)
     client.post("/command", json={"text": "show ros"})
     wait_until(lambda: client.get("/state").get_json()["map_ros"] is True, timeout=5)
     client.post("/command", json={"text": "hide ROS."})
@@ -876,20 +813,6 @@ def test_the_stage_is_the_page(client):
     assert client.post("/rerun", json={}).status_code == 404 and client.post("/save", json={}).status_code == 404
     assert client.get("/tools").status_code == 404
 
-
-def test_voice_output_settings_route_validates(client, monkeypatch):
-    for name in ("VOICE_VERBOSITY", "VOICE_PERSONA", "FOLLOW_UP_S", "CONFIRM_TIMEOUT_S", "MAP_ROS"):
-        monkeypatch.setattr(web_console.config, name, getattr(web_console.config, name))   # restored after the test
-    r = client.post("/settings/voice", json={"voice_verbosity": 2, "voice_persona": "B", "follow_up_s": 5, "confirm_timeout_s": 30, "map_ros": True})
-    assert r.status_code == 200 and r.get_json()["verbosity"] == 2 and web_console.config.VOICE_PERSONA == "B"
-    assert client.post("/settings/voice", json={"voice_verbosity": 7}).status_code == 400
-    assert client.post("/settings/voice", json={"confirm_timeout_s": 1}).status_code == 400
-    assert client.post("/settings/voice", json={"ollama_url": "http://x"}).status_code == 400     # not one of these settings
-    s = client.get("/state").get_json()
-    assert s["verbosity"] == 2 and s["persona"] == "B" and s["follow_up_s"] == 5 and s["confirm_timeout_s"] == 30 and s["map_ros"] is True
-
-
-# ---- the review's fix pass ----
 
 def test_stop_is_announced_once(client, recorder, monkeypatch):
     c = web_console.console
@@ -948,7 +871,6 @@ def test_the_voice_apps_listening_state_sets_the_phase(client, voice_on, recorde
 
 def test_a_leading_wake_word_does_not_spoil_a_confirm(client, confirm_on, recorder):
     c = web_console.console
-    web_console.voice_link.latest["wake_word"] = "truffles"
     line_agent(client, {"kind": "line", "label": "Point 10", "distance_cm": 14, "seconds": 6})
     c.heard("go to point ten")
     wait_until(lambda: c.pending)

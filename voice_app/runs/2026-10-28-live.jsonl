@@ -1,0 +1,1 @@
+{"run": "2026-10-28-live", "outcome": "no_speech", "started_by": "wake", "marks_audio_s": {"trigger": 2782.112}, "settings_summary": "openwakeword + silero + silence + parakeet/batch"}

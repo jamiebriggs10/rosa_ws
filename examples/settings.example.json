@@ -12,8 +12,20 @@
   "robot_port": "",
   "network_profile": "robot",
   "ursim_ip": "192.168.56.101",
-  "voice_url": "http://127.0.0.1:8100",
-  "voice_on": false,
-  "voice_confirm": false,
-  "voice_start": "~/rosa_ws/voice_app/.venv/bin/python ~/rosa_ws/voice_app/app.py"
+  "voice": {
+    "on": false,
+    "confirm": true,
+    "verbosity": 1,
+    "persona": "A",
+    "follow_up_s": 8,
+    "confirm_timeout_s": 20,
+    "map_ros": false,
+    "input_device": "Jabra",
+    "output_device": null,
+    "wake_threshold": 0.5,
+    "silence_ms": 700,
+    "speech_voice": "en_GB-alan-medium",
+    "speech_enabled": true,
+    "sounds_enabled": true
+  }
 }
