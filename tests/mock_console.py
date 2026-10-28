@@ -197,7 +197,10 @@ class Mock:
                 "think": self.think, "joint_list": JOINTS, "limits": LIMITS, "ceilings": CEILINGS,
                 "labels": LABELS, "speed": 0.1, "shown_path": self.shown_path, "ollama_url": "http://localhost:11434",
                 "frames": {"base": "base", "tool": "tool0"}, "local": True,
-                "voice": {**(self.voice_unit.latest if self.voice_unit else {"running": False, "state": "idle", "final": "", "error": "", "felt_ms": None}), **self.voice},
+                "voice": {**(self.voice_unit.latest if self.voice_unit else
+                             {"running": False, "state": "idle", "final": "", "felt_ms": None,
+                              "error": "No voice in this mock: start it with --voice (the microphone) or --voice-file clip.wav."}),
+                          **self.voice},
                 "robot": {"mode": "sim", "overall": {"lamp": "ok", "text": "ready (mock)"}, "alert": None,
                           "rungs": [{"title": "URSim answering", "detail": "mock", "lamp": "ok"}, {"title": "the driver", "detail": "mock", "lamp": "ok"}]},
                 "phase": self.phase, "phase_since_s": round(time.time() - self.phase_since, 1), "follow_until_s": round(left, 1),
