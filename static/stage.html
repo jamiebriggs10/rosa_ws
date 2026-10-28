@@ -298,8 +298,7 @@ function render(s) {
   $("phase-label").textContent = "· " + s.phase;
   $("state-text").textContent = stateText(s);
   const you = [...s.messages].reverse().find(m => m.who === "you");
-  if (s.voice && s.voice.partial) $("heard").innerHTML = `<em>${esc(s.voice.partial)}<span class="cur"></span></em>`;
-  else if (you) $("heard").innerHTML = `${you.via === "voice" ? "Heard" : "You"}: <em>"${esc(you.text)}"</em>`;
+  if (you) $("heard").innerHTML = `${you.via === "voice" ? "Heard" : "You"}: <em>"${esc(you.text)}"</em>`;
   else $("heard").textContent = "";
   const robot = [...s.messages].reverse().find(m => m.who === "robot");
   const tool = s.status.tool_cm;

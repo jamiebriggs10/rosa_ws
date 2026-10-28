@@ -6,6 +6,7 @@ Nothing else in the code names a particular robot.
 import json
 import os
 import pathlib
+import re
 
 # --- The settings file ---------------------------------------------------------
 # Everything an operator changes from the console (Ollama address, model, safety
@@ -152,7 +153,7 @@ VOICE_CHECKS = {
     "follow_up_s": _num(0, 30), "confirm_timeout_s": _num(5, 120), "wake_threshold": _num(0.1, 0.9),
     "silence_ms": lambda v: isinstance(v, int) and not isinstance(v, bool) and 300 <= v <= 1500,
     "input_device": _name, "output_device": _name,
-    "speech_voice": lambda v: isinstance(v, str) and 0 < len(v) <= 80,
+    "speech_voice": lambda v: isinstance(v, str) and re.fullmatch(r"[\w.-]{1,80}", v) is not None,   # a file name in models/piper
 }
 # The keys a settings.json from before 2026-10-28 used, and where they went.
 _OLD_VOICE_KEYS = {"voice_on": "on", "voice_confirm": "confirm", "voice_verbosity": "verbosity", "voice_persona": "persona",

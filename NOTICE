@@ -6,3 +6,10 @@ https://github.com/nasa-jpl/rosa
 ROSA is installed unmodified from PyPI (jpl-rosa). This project's own files
 (config.py, robot_tools.py, rosa_agent.py) are Jamie Briggs's dissertation
 work built on top of it.
+
+The voice package (voice/) uses, unmodified, from PyPI:
+  openWakeWord (Apache-2.0, David Scripka) for the wake word; models/truffles.onnx was
+    trained with its tools for this project.
+  Silero VAD v5 (MIT, Silero Team) through onnxruntime.
+  sherpa-onnx (Apache-2.0, k2-fsa) running NVIDIA's Parakeet TDT 0.6B v3 (CC-BY-4.0).
+  Piper (GPL-3.0, OHF-Voice / Rhasspy) with the en_GB-alan-medium voice (MIT) for Rosa's voice.

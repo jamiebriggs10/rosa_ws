@@ -79,7 +79,7 @@ class Console:
         # The loop (see PHASES). Each change is timestamped into the running command's record.
         self.phase, self.phase_since = "idle", time.time()
         self._phases = []
-        self.follow_until = 0.0               # until when the voice app listens without the wake word (0: closed)
+        self.follow_until = 0.0               # until when voice listens without the wake word (0: closed)
         self.held = None                      # a correction kept for after the current command ("no, point eleven")
         self.declined_run = False             # the operator said no once in this run: no more cards for it
         self.lit = []                         # map nodes a spoken tour is pointing at right now
@@ -87,7 +87,7 @@ class Console:
         self.timed_out = None                 # the label of a card nobody answered, for the spoken line
         self._last_label = None               # what the last card proposed, for the held correction's context
         self._changed = False                 # this command is a held correction: the proposal says "instead"
-        self._felt_ms = None                  # the voice app's felt delay for the spoken command running now
+        self._felt_ms = None                  # the felt delay of the spoken command running now
         self._tour_id = 0                     # a new question or command interrupts a running tour
         self._last_event = None               # the last tool event, for "where did that go"
         self._stop_said = False               # stop() has already announced this stop
@@ -102,7 +102,7 @@ class Console:
 
     def _announce(self, phase, **facts):
         """Every phase has a sound; by verbosity, a spoken line too. The words come from lines.py and
-        the facts the console measured. All of it goes to the voice app and never blocks."""
+        the facts the console measured. All of it goes to the voice package and never blocks."""
         v, persona = config.VOICE["verbosity"], config.VOICE["persona"]
         sound, kind, level = {
             "listening": ("listen", None, 9), "heard": ("heard", None, 9), "thinking": ("think", "preface", 2),
@@ -130,7 +130,7 @@ class Console:
         voice_unit.followup(seconds)
 
     def voice_timings(self, felt_ms):
-        """The voice app's felt delay for the utterance it just finished: kept with that command's record."""
+        """The felt delay of the utterance voice just finished: kept with that command's record."""
         self._felt_ms = felt_ms
         if self.records and self.records[-1].get("via") == "voice" and "felt_ms" not in self.records[-1] \
                 and not self.busy:
@@ -296,7 +296,7 @@ class Console:
             self._open_follow_up()
 
     def _wait_said(self):
-        """Wait for the voice app to finish the line: it reports speaking on and off; without it,
+        """Wait for Rosa to finish the line: voice reports speaking on and off; without it,
         a fixed 1.8 s per sentence."""
         latest = voice_unit.latest
         t0 = time.time()
@@ -318,7 +318,7 @@ class Console:
             self.busy, self.busy_since = True, time.time()
         self._phases, self.declined_run, self.follow_until, self.lit, self.timed_out = [], False, 0.0, [], None
         self._tour_id += 1                    # a tour still talking stops here
-        voice_unit.followup(0)                # and the voice app's follow-up window, if one was open, closes
+        voice_unit.followup(0)                # and voice's follow-up window, if one was open, closes
         self.set_phase("thinking")
         self._announce("thinking")
         message = {"who": "you", "text": shown_text}
@@ -446,6 +446,7 @@ class Console:
                              "phases": list(self._phases)})
         self._current = None
         self._agent = None                    # the old one is still busy; start the next command afresh
+        self._stop_said = False               # the abandoned command's ending never comes to clear it
         if self.pending:
             self.answer(self.pending["id"], False)
         self._rest(3)
@@ -619,7 +620,7 @@ class Console:
 
 
 def timings(record):
-    """The loop's timings for one record, as table cells: felt delay (from the voice app),
+    """The loop's timings for one record, as table cells: felt delay (from voice),
     think (thinking to the proposal or the end), to confirm (proposing to moving), motion."""
     phases = record.get("phases") or []
 
@@ -692,7 +693,7 @@ def find_group(rows, words):
 
 
 # Questions about the console itself, answered here (spoken, with the map lit) and never sent to
-# the model. Whole utterances; the wake word, if any, has already been trimmed by the voice app.
+# the model. Whole utterances; the wake word, if any, is trimmed by words.strip_wake.
 SELF_QUESTIONS = [
     ("tour", re.compile(r"^(?:what can i (?:do|say))(?: with (?P<g>.+?))?\s*[?.!]*$", re.I)),
     ("tour", re.compile(r"^what(?:'s| is) connected to (?P<g>.+?)\s*[?.!]*$", re.I)),
@@ -995,7 +996,7 @@ def finish():
     return jsonify(path=out["path"], records=[{**r, "timings": timings(r)} for r in out["records"]])
 
 
-# -- voice: the switch, the address, and a window onto the voice app's own settings ------
+# -- voice: the switch, voice confirm, Hold to talk, Test voice, the device menus ------
 
 @app.post("/voice/on")
 def voice_on():

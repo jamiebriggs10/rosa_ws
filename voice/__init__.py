@@ -34,13 +34,14 @@ class Voice:
         self._make_speaker = make_speaker or self._real_speaker
         self.sessions_dir = pathlib.Path(sessions_dir)
         self.latest = {"running": False, "state": "idle", "level": 0.0, "final": "", "action": "", "felt_ms": None,
-                       "error": "", "loading": "", "speaking": False, "followup_s": 0, "wake_on": False,
-                       "speech_available": False, "speech_reason": "", "devices": {"input": [], "output": []}}
+                       "error": "", "loading": "", "speaking": False, "followup_s": 0,
+                       "wake_on": bool(self.settings.get("on")), "speech_reason": "",
+                       "devices": {"input": [], "output": []}}
         self.pipeline = None
         self.speaker = self.sounds = None
         self._thread = None
         self._source = None
-        self._reopen = False
+        self._reopen = threading.Event()        # set when the microphone must be opened again
         self._stopping = False
 
     # -- starting and stopping ---------------------------------------------------------
@@ -51,6 +52,7 @@ class Voice:
 
     def stop(self):
         self._stopping = True
+        self._reopen.set()                      # wakes a thread waiting for a better microphone
         if self.speaker is not None:
             self.speaker.cancel()
         if self.pipeline is not None:
@@ -62,7 +64,8 @@ class Voice:
 
     def _run(self):
         """The pipeline's thread: build, load, then run the microphone until stopped. A new
-        microphone (update) stops the run and opens the next one here."""
+        microphone (update) ends the run between utterances and the loop opens the next one; a
+        microphone that cannot be opened is reported and the loop waits for a better name."""
         try:
             self.latest["loading"] = "loading the speech models…"
             from voice.pipeline import Pipeline
@@ -74,19 +77,28 @@ class Voice:
             self._build_speaker()
             self.latest["devices"] = audio.list_devices()
             self.latest["loading"] = ""
-            while not self._stopping:
-                self._source = self._make_source(self.settings)
-                self.latest["running"], self.latest["error"] = True, ""
-                self.pipeline.run(self._source)
-                if not self._reopen:
-                    break
-                self._reopen = False
         except Exception as exc:
-            self.latest["error"] = str(exc)
-            self.latest["loading"] = ""
+            self.latest["error"], self.latest["loading"] = str(exc), ""
             self._call(self.on_error, str(exc))
-        finally:
+            return
+        while not self._stopping:
+            self._reopen.clear()
+            try:
+                self._source = self._make_source(self.settings)
+            except Exception as exc:            # no such microphone: say so, wait for the settings to change
+                self.latest["error"], self.latest["running"] = str(exc), False
+                self._call(self.on_error, str(exc))
+                self._reopen.wait()
+                continue
+            self.latest["running"], self.latest["error"] = True, ""
+            try:
+                self.pipeline.run(self._source)
+            except Exception as exc:
+                self.latest["error"] = str(exc)
+                self._call(self.on_error, str(exc))
             self.latest["running"] = False
+            if not self._reopen.is_set():
+                break
 
     def _real_stages(self):
         from voice import stages
@@ -105,7 +117,6 @@ class Voice:
         engine = speech.piper_engine(voice, models.path("piper"))
         speaker = speech.Speaker(engine or (lambda text: None), player, cache_dir=models.path("cache", "say"),
                                  on_speaking=on_speaking, voice_key=voice)
-        speaker.available = engine is not None
         return speaker, speech.Sounds(player)
 
     def _build_speaker(self):
@@ -114,7 +125,6 @@ class Voice:
             old.cancel()
         self.speaker, self.sounds = self._make_speaker(self.settings.get("speech_voice", models.PIPER_VOICE),
                                                        self._on_speaking, self.settings.get("output_device"))
-        self.latest["speech_available"] = getattr(self.speaker, "available", True)
 
     def _on_speaking(self, on):
         self.latest["speaking"] = bool(on)
@@ -124,8 +134,8 @@ class Voice:
     # -- from the console ----------------------------------------------------------------
 
     def update(self, changes):
-        """New values for the voice block. Applied between utterances; a new microphone or
-        output device reopens it."""
+        """New values for the voice block. Applied between utterances; a new microphone is
+        opened then, a new output device or voice rebuilds the speaker."""
         self.settings.update(changes)
         if self.pipeline is None:
             return
@@ -140,9 +150,10 @@ class Voice:
             self.pipeline.request(set_silence)
         if "speech_voice" in changes or "output_device" in changes:
             self.pipeline.request(self._build_speaker)
-        if "input_device" in changes and self.latest["running"]:
-            self._reopen = True
-            self.pipeline.stop()
+        if "input_device" in changes:
+            self._reopen.set()                  # a thread waiting after a bad name tries again now
+            if self.latest["running"]:
+                self.pipeline.request(self.pipeline.stop)   # between utterances, never mid-sentence
 
     def ptt(self, down):
         if self.pipeline is not None:
@@ -168,10 +179,6 @@ class Voice:
         spoken = self.speaker.say(text)
         self.latest["speech_reason"] = "" if spoken else self.speaker.reason
         return spoken
-
-    def hush(self):
-        if self.speaker is not None:
-            self.speaker.cancel()
 
     def play(self, name):
         if not self.settings.get("sounds_enabled", True) or self.sounds is None:

@@ -157,10 +157,13 @@ class MicSource:
 
     def stop(self):
         self._running = False
-        if self._stream is not None:
-            self._stream.stop()
-            self._stream.close()
-            self._stream = None
+        stream, self._stream = self._stream, None
+        if stream is not None:
+            try:
+                stream.stop()
+                stream.close()
+            except Exception:                  # already closed by the other caller
+                pass
 
     def backlog(self):
         return self._q.qsize()

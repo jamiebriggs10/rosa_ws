@@ -876,3 +876,22 @@ def test_a_leading_wake_word_does_not_spoil_a_confirm(client, confirm_on, record
     wait_until(lambda: c.pending)
     assert c.heard("Truffles, confirm") == "confirmed"
     wait_until(lambda: not c.busy)
+
+
+def test_cancel_after_a_stop_does_not_silence_a_later_stopped_ending(client, voice_on, recorder):
+    started, release = threading.Event(), threading.Event()
+    def slow():
+        started.set(); release.wait(2); return "late"
+    client.agent.action = slow
+    client.post("/command", json={"text": "think"})
+    started.wait(1)
+    client.post("/stop")                                   # while busy: the command's own ending would not repeat it
+    client.post("/cancel")                                 # but the command is abandoned, so that ending never comes
+    release.set(); time.sleep(0.2)
+    def halted():                                          # a later command whose tool reports it was stopped
+        robot_tools.events.append({"tool": "move_by", "args": {}, "outcome": "stopped", "message": "Stopped part-way."})
+        return "Stopped part-way."
+    client.agent.action = halted
+    client.post("/command", json={"text": "up five"})
+    wait_until(lambda: not web_console.console.busy)
+    assert any("part-way" in t for t in recorder.say_calls), recorder.say_calls

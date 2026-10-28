@@ -90,3 +90,9 @@ def test_save_merges_the_voice_block_one_level_down(tmp_path, monkeypatch):
 
 def test_voice_confirm_defaults_on():
     assert config.VOICE_DEFAULTS["confirm"] is True
+
+
+def test_speech_voice_is_a_plain_file_name():
+    assert config.voice_settings_ok({"speech_voice": "en_GB-alan-medium"}) is None
+    assert "speech_voice" in config.voice_settings_ok({"speech_voice": "../../etc/x"})
+    assert "speech_voice" in config.voice_settings_ok({"speech_voice": ""})

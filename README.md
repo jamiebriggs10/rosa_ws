@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/jamiebriggs10/rosa_ws/main/install.
 ```
 
 The installer clones this repository to `~/rosa_ws`, makes a Python venv,
-installs three packages, writes `~/.config/rosa_ws/settings.json`, and
+installs the Python packages, writes `~/.config/rosa_ws/settings.json`, and
 starts the console as a user service (`rosa-console`) that comes back at
 every login. It never needs `sudo` and never touches the robot's workspace.
 It ends by printing the address to open. Run it again at any time to update.

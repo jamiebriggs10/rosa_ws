@@ -111,3 +111,58 @@ def test_say_mutes_the_pipeline_while_speaking(tmp_path):
     v.update({"speech_enabled": False})
     assert v.say("x") is False and "off" in v.latest["speech_reason"]
     v.stop(); v.wait(5)
+
+
+class HoldSource:
+    """Frames on demand: yields `first`, then waits for go() before yielding `rest`, then ends."""
+    kind = "test"
+    def __init__(self, first, rest):
+        self.first, self.rest, self._go, self._running = first, rest, threading.Event(), False
+    def start(self): self._running = True
+    def stop(self): self._running = False; self._go.set()
+    def backlog(self): return 0
+    def go(self): self._go.set()
+    def frames(self):
+        yield from self.first
+        self._go.wait(5)
+        if self._running:
+            yield from self.rest
+
+
+def test_changing_the_input_device_waits_for_the_utterance_to_end(tmp_path):
+    opened, sources = [], []
+    def make_source(settings):
+        opened.append(settings.get("input_device"))
+        src = HoldSource(frames_of(("click", 1), ("speech", 10)), frames_of(("speech", 21), ("silence", 31))) if len(opened) == 1 else SlowSource()
+        sources.append(src)
+        return src
+    seen = Seen()
+    v = seen.voice(make_stages=fakes, make_source=make_source, sessions_dir=tmp_path)
+    v.start()
+    wait_until(lambda: v.latest["state"] == "listening")
+    v.update({"input_device": "B"})                      # mid-utterance: must wait
+    time.sleep(0.1)
+    assert opened == [None] and v.latest["state"] == "listening" and seen.finals == []
+    sources[0].go()
+    wait_until(lambda: opened == [None, "B"])
+    # the whole utterance: 3 confirming frames in the pre-roll, 28 more speech, 10 quiet ones to the endpoint; nothing cut
+    assert seen.finals == [f"{(3 + 28 + 10) * 512} samples"]
+    v.stop(); v.wait(5)
+
+
+def test_a_bad_microphone_can_be_corrected_from_the_settings(tmp_path):
+    opened = []
+    def make_source(settings):
+        opened.append(settings.get("input_device"))
+        if settings.get("input_device") == "NoSuchMic":
+            raise ValueError("no input device matching 'NoSuchMic'")
+        return SlowSource()
+    seen = Seen()
+    v = seen.voice({**SETTINGS, "input_device": "NoSuchMic"}, make_stages=fakes, make_source=make_source, sessions_dir=tmp_path)
+    v.start()
+    wait_until(lambda: "NoSuchMic" in v.latest["error"])
+    assert v.latest["running"] is False
+    v.update({"input_device": "Jabra"})
+    wait_until(lambda: v.latest["running"] and v.latest["error"] == "")
+    assert opened == ["NoSuchMic", "Jabra"]
+    v.stop(); v.wait(5)

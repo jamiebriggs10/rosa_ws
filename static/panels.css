@@ -37,15 +37,10 @@
   .help summary { cursor: pointer; font-weight: 500; }
   .help ul { margin: 8px 0 4px; padding-left: 18px; }
   .help li { margin: 3px 0; }
-  .help .cmd { color: var(--action); cursor: pointer; }
-  .help .cmd:hover { text-decoration: underline; }
 
 
-/* The robot-connection widget and ladder, voice, the voice app's settings */
+/* The robot-connection widget and ladder, voice, the voice form */
   /* The robot-connection widget in the header, and the dialog it opens */
-  .robot-widget { display: inline-flex; align-items: center; gap: 7px; font: inherit; font-size: 13px; padding: 4px 10px;
-    border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink); cursor: pointer; }
-  .robot-widget:hover { border-color: var(--muted); }
   .lamp { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #9aa5b1; flex: none; }
   .lamp.ok { background: var(--ok); } .lamp.bad { background: var(--bad); } .lamp.gate { background: var(--gate); }
   .robot-panel { max-width: 760px; }
@@ -75,8 +70,7 @@
   .robot-panel .foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
   .robot-panel .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
 
-  /* Voice control: the header switch and gear, the pop-up, and the voice app's settings it draws */
-  .gear { width: 28px; height: 28px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; margin-left: -10px; }
+  /* Voice control: the header switch and gear, the pop-up, and the voice form it draws */
   .lamp.off { background: #9aa5b1; } .lamp.wait { background: var(--gate); } .lamp.busy { background: var(--action); }
   .voice-panel { max-width: 820px; max-height: 92vh; overflow: auto; }
   .voice-panel .head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
@@ -94,7 +88,6 @@
   .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; }
   .meter div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
   .voice-panel .heard { min-height: 1.6em; margin: 8px 0; font-size: 16px; }
-  .voice-panel .heard .partial { color: var(--muted); font-style: italic; }
   .voice-panel .heard .empty-note { color: var(--muted); font-size: 13px; }
   .voice-panel .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0; }
   .voice-panel .row input:not([type=checkbox]) { flex: 1 1 200px; font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }
@@ -107,18 +100,8 @@
   .voice-panel .stage { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
   .voice-panel .stage h4 { margin: 0 0 6px; font-size: 14px; }
   .voice-panel .stage h4 small { color: var(--muted); font-weight: 400; margin-left: 8px; }
-  .voice-panel .badge { font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--gate-bg); color: var(--gate); margin-left: 8px; }
-  .voice-panel .knob { display: grid; grid-template-columns: 170px 1fr; gap: 2px 10px; align-items: center; margin: 5px 0; font-size: 13.5px; }
-  .voice-panel .knob label { color: var(--muted); }
   .voice-panel .row select { font: inherit; font-size: 13.5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; max-width: 100%; }
-  .voice-panel .knob input[type=checkbox] { justify-self: start; }
-  .voice-panel .knob .help, .voice-panel .knob details { grid-column: 1 / -1; }
-  .voice-panel .knob .help { color: var(--muted); font-size: 12px; }
-  .voice-panel details.explain { font-size: 12.5px; margin: 2px 0 4px; }
-  .voice-panel details.explain summary { color: var(--action); cursor: pointer; }
-  .voice-panel details.explain p { margin: 4px 0; }
   .voice-panel .foot { display: flex; justify-content: flex-end; margin-top: 12px; }
-  @media (max-width: 560px) { .voice-panel .knob { grid-template-columns: 1fr; } }
 
 
 /* Saved moves */

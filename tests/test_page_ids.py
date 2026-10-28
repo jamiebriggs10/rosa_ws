@@ -115,3 +115,19 @@ def test_the_voice_form_has_no_generated_parts():
         assert gone not in text, gone
     for there in ("s-input-device", "s-wake-threshold", "s-silence-ms", "s-output-device", "s-speech-enabled", "s-sounds-enabled"):
         assert f'id="{there}"' in page, there
+
+
+def test_every_style_rule_has_something_to_style():
+    """A class in panels.css must be used by the page or a script, or it is dead."""
+    css = (STATIC / "panels.css").read_text()
+    used = "\n".join((STATIC / f).read_text() for f in ("stage.html", "panels.js", "map.js", "view.js"))
+    classes = set(re.findall(r"\.([a-zA-Z][\w-]*)", re.sub(r"/\*.*?\*/", "", css, flags=re.S)))
+    dead = sorted(c for c in classes if not re.search(r"\b" + re.escape(c) + r"\b", used))
+    assert not dead, f"panels.css styles nothing with: {dead}"
+
+
+def test_the_code_no_longer_speaks_of_the_voice_app():
+    root = STATIC.parent
+    files = [root / n for n in ("web_console.py", "config.py", "lines.py")] + list((root / "voice").glob("*.py")) + [f for f in STATIC.iterdir() if f.suffix in (".html", ".js", ".css")]
+    hits = [f"{f.name}:{i}" for f in files for i, line in enumerate(f.read_text().splitlines(), 1) if "voice app" in line.lower()]
+    assert not hits, hits
