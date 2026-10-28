@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""A scripted console for page work on the Mac: serves the real pages and scripts from static/
-with pretend answers, so the stage and the workbench can be worked on without ROS, a model, a
-robot or a model. From the console it imports only voice.py, the link to the voice app, which is
-pure Python (the Mac has no rclpy); it never runs on the lab PC.
+"""A scripted console for page work on the Mac: serves the real page and scripts from static/ with
+pretend answers, so the stage can be worked on without ROS, a model or a robot. From the console it
+imports only the voice package and config.py, which are pure Python (the Mac has no rclpy); it
+never runs on the lab PC.
 
-    python3 tests/mock_console.py [--port 8002] [--rows 160] [--think 3.5] [--voice http://127.0.0.1:8100]
+    python3 tests/mock_console.py [--port 8002] [--rows 160] [--think 3.5] [--voice | --voice-file clip.wav]
 
-With --voice it talks to a real voice app, which runs natively on the Mac (cd voice_app &&
-.venv/bin/python app.py): spoken words arrive as commands, the sounds and the read-backs play,
-exactly as on the lab PC. Without it, the voice routes answer 502 and the pill says so.
+--voice runs the real voice package in this process on the microphone (start it from your own
+Terminal so macOS lets it use the mic); --voice-file loops a WAV instead. Either way spoken words
+arrive as commands, the sounds and the read-backs play, exactly as on the lab PC. Without them the
+voice routes answer as if the voice package were not running.
 
-Then open http://localhost:8002/stage (or /). What it understands: "show me the raster (and its
-points)", "go to point N", "go home", "up/down/left/right/forward/back N", "joint N by D degrees",
-"take a scan view", "run the raster", "where is the tool", "what can I do (with X)", "which of
-these move the robot", "where did that go", "show/hide ros", "stop", and on a card: "confirm", "no",
-"no, point N". Everything else is refused with the list of nodes. Phases advance on timers with
-the plan's facts, so the pages see the same /state shape as from the real console.
+Then open http://localhost:8002/. What it understands: "show me the raster (and its points)",
+"go to point N", "go home", "up/down/left/right/forward/back N", "joint N by D degrees", "take a
+scan view", "run the raster", "where is the tool", "what can I do (with X)", "which of these move
+the robot", "where did that go", "show/hide ros", "stop", and on a card: "confirm", "no", "no,
+point N". Everything else is refused with the list of nodes. Phases advance on timers with the
+plan's facts, so the page sees the same /state shape as from the real console.
 --rows pads the capability list with that many undescribed interfaces (the map's hard case).
 """
 import argparse
@@ -31,7 +32,8 @@ from flask import Flask, jsonify, request, send_from_directory
 HERE = pathlib.Path(__file__).resolve().parent
 STATIC = HERE.parent / "static"
 sys.path.insert(0, str(HERE.parent))
-from voice import words                      # noqa: E402  what a spoken phrase means (pure Python)
+import config                                 # noqa: E402  the voice block's defaults and checks
+from voice import words                      # noqa: E402  what a spoken phrase means
 
 # The sound each phase makes (the same table as the console's _announce).
 PHASE_SOUNDS = {"listening": "listen", "heard": "heard", "thinking": "think", "proposing": "ask", "moving": "go",
@@ -102,10 +104,8 @@ class Mock:
         self.shown_path = None
         self.said, self.lit, self.trace = "", [], None
         self.follow_until = 0.0
-        self.settings = {"voice_verbosity": 1, "voice_persona": "A", "follow_up_s": 8.0, "confirm_timeout_s": 20.0, "map_ros": False}
+        self.voice = {**config.VOICE_DEFAULTS, "on": True}   # the voice block, as the console keeps it
         self.model, self.think = "mock-model", False
-        self.voice = {"running": False, "state": "idle", "partial": "", "final": "", "on": True, "confirm": True, "url": "http://127.0.0.1:8100",
-                      "level": 0, "felt_ms": None, "error": "", "loading": "", "summary": "", "device": "", "action": "", "speaking": False}
         self.rows = [dict(r) for r in BASE_ROWS]
         for i in range(rows):
             self.rows.append({"name": f"/controller_{i % 8}/thing_{i}", "kind": "topic", "type": "std_msgs/msg/Float64", "node": f"controller_{i % 8}",
@@ -116,28 +116,24 @@ class Mock:
         self._answer = threading.Event()
         self._ok = False
         self._run_id = 0
-        self.link = None                      # a real voice app, when --voice names one
-        self.voice_stopped = False
+        self.voice_unit = None                # the real voice package, when --voice is given
+        self.felt_ms = None
 
-    # -- the voice app, when there is one -------------------------------------------
-    def attach_voice(self, url):
-        raise NotImplementedError("the in-process voice comes with the one-program tidy-up (Task 8)")
+    # -- the voice package, when there is one -------------------------------------
+    def attach_voice(self, voice_unit):
+        self.voice_unit = voice_unit
 
-    def _wake_words(self):
-        extra = self.link.latest.get("wake_word") if self.link else None
-        return words.WAKE_WORDS + ((extra,) if extra else ())
+    def voice_timings(self, felt_ms):
+        self.felt_ms = felt_ms
 
     def heard(self, text):
         """Spoken text, handled as the console's heard() does: only "stop" skips the model."""
-        text = words.strip_wake(text, self._wake_words())
+        text = words.strip_wake(text)
         if not self.voice["on"]:
             return "off"
         if not text:
             return "empty"
         if words.is_stop(text):
-            if self.voice_stopped:
-                return "swallowed"
-            self.voice_stopped = True
             self.stop("Stopped by voice.")
             return "stopped"
         if not self.busy:
@@ -164,13 +160,12 @@ class Mock:
             self.set_phase("listening")
 
     def voice_idle(self):
-        self.voice_stopped = False
         if self.phase == "listening" and not self.busy:    # the window closed with nothing said
             self.set_phase("idle")
 
     def _play(self, name):
-        if self.link:
-            self.link.play(name)
+        if self.voice_unit:
+            self.voice_unit.play(name)
 
     def stop(self, note="Stop sent to the arm (mock)."):
         if self.pending:
@@ -189,8 +184,8 @@ class Mock:
 
     def say(self, text):
         self.said = text
-        if self.link:
-            self.link.say(text)
+        if self.voice_unit:
+            self.voice_unit.say(text)
 
     def state(self):
         left = max(0.0, self.follow_until - time.time())
@@ -202,14 +197,13 @@ class Mock:
                 "think": self.think, "joint_list": JOINTS, "limits": LIMITS, "ceilings": CEILINGS,
                 "labels": LABELS, "speed": 0.1, "shown_path": self.shown_path, "ollama_url": "http://localhost:11434",
                 "frames": {"base": "base", "tool": "tool0"}, "local": True,
-                "voice": {**self.link.latest, **{k: self.voice[k] for k in ("on", "confirm", "url")}} if self.link else self.voice,
+                "voice": {**(self.voice_unit.latest if self.voice_unit else {"running": False, "state": "idle", "final": "", "error": "", "felt_ms": None}), **self.voice},
                 "robot": {"mode": "sim", "overall": {"lamp": "ok", "text": "ready (mock)"}, "alert": None,
                           "rungs": [{"title": "URSim answering", "detail": "mock", "lamp": "ok"}, {"title": "the driver", "detail": "mock", "lamp": "ok"}]},
                 "phase": self.phase, "phase_since_s": round(time.time() - self.phase_since, 1), "follow_until_s": round(left, 1),
                 "trace": self.trace, "lit": self.lit, "held": self.held, "said": self.said,
-                "verbosity": self.settings["voice_verbosity"], "persona": self.settings["voice_persona"],
-                "follow_up_s": self.settings["follow_up_s"], "confirm_timeout_s": self.settings["confirm_timeout_s"],
-                "map_ros": self.settings["map_ros"]}
+                "verbosity": self.voice["verbosity"], "persona": self.voice["persona"], "follow_up_s": self.voice["follow_up_s"],
+                "confirm_timeout_s": self.voice["confirm_timeout_s"], "map_ros": self.voice["map_ros"]}
 
     # -- commands --------------------------------------------------------------
     def command(self, text, via=None):
@@ -223,8 +217,8 @@ class Mock:
             return True
         self.busy = True
         self.follow_until, self.lit, self.trace = 0.0, [], None
-        if self.link:
-            self.link.followup(0)
+        if self.voice_unit:
+            self.voice_unit.followup(0)
         self._run_id += 1
         threading.Thread(target=self._run, args=(text, self._run_id, via), daemon=True).start()
         return True
@@ -243,8 +237,8 @@ class Mock:
         if self.pending and self.pending["id"] == pid:
             self._ok = ok
             self._answer.set()
-            if self.link:
-                self.link.followup(0)
+            if self.voice_unit:
+                self.voice_unit.followup(0)
             return True
         return False
 
@@ -283,8 +277,8 @@ class Mock:
             return True
         m = re.match(r"^(show|hide) ros$", t)
         if m:
-            self.settings["map_ros"] = m.group(1) == "show"
-            self._say_now("ROS names shown." if self.settings["map_ros"] else "ROS names hidden.")
+            self.voice["map_ros"] = m.group(1) == "show"
+            self._say_now("ROS names shown." if self.voice["map_ros"] else "ROS names hidden.")
             return True
         return False
 
@@ -305,10 +299,10 @@ class Mock:
         self._open_follow_up()
 
     def _open_follow_up(self, seconds=None):
-        seconds = self.settings["follow_up_s"] if seconds is None else seconds
+        seconds = self.voice["follow_up_s"] if seconds is None else seconds
         self.follow_until = time.time() + seconds
-        if self.link and seconds > 0:
-            self.link.followup(seconds)
+        if self.voice_unit and seconds > 0:
+            self.voice_unit.followup(seconds)
 
     # -- the pretend model and robot ---------------------------------------------
     def understand(self, t):
@@ -455,8 +449,8 @@ class Mock:
         self.pending = {"id": str(time.time()), "text": description, "preview": preview, "facts": preview.get("facts")}
         self.set_phase("proposing")
         self.say(line)
-        self._open_follow_up(self.settings["confirm_timeout_s"])
-        answered = self._answer.wait(timeout=self.settings["confirm_timeout_s"])
+        self._open_follow_up(self.voice["confirm_timeout_s"])
+        answered = self._answer.wait(timeout=self.voice["confirm_timeout_s"])
         self.pending = None
         if not answered:
             self.set_phase("cancelled")
@@ -522,12 +516,10 @@ class Mock:
                 "preview": {"joints": names, "path_deg": path, "seconds": facts["seconds"], "points_cm": points_cm, "facts": facts}}
 
 
-def create_app(think_s=3.5, rows=0, voice_url=None):
+def create_app(think_s=3.5, rows=0):
     app = Flask(__name__, static_folder=str(STATIC), static_url_path="/static")
     mock = Mock(think_s=think_s, rows=rows)
     app.config["mock"] = mock
-    if voice_url:
-        mock.attach_voice(voice_url)
 
     @app.get("/")
     def index():
@@ -621,55 +613,73 @@ def create_app(think_s=3.5, rows=0, voice_url=None):
     @app.post("/voice/on")
     def voice_on():
         mock.voice["on"] = bool((request.json or {}).get("on"))
-        note = mock.link.set_on(mock.voice["on"]) if mock.link else None
-        return jsonify(ok=True, on=mock.voice["on"], note=note)
+        if mock.voice_unit:
+            mock.voice_unit.set_wake(mock.voice["on"])
+        return jsonify(ok=True, on=mock.voice["on"])
 
     @app.post("/voice/confirm")
     def voice_confirm():
         mock.voice["confirm"] = bool((request.json or {}).get("on"))
         return jsonify(ok=True, confirm=mock.voice["confirm"])
 
-    @app.post("/voice/url")
-    def voice_url():
-        url = str((request.json or {}).get("url", "")).rstrip("/")
-        if not mock.link:
-            return jsonify(error="The voice app is not answering (mock: start me with --voice)."), 502
-        try:
-            status, body = mock.link.request("GET", "/status", base=url)
-        except Exception as exc:
-            return jsonify(error=str(exc)), 502
-        if status != 200 or "state" not in body:
-            return jsonify(error=f"{url} answered, but it is not the voice app."), 400
-        mock.voice["url"] = url
-        mock.link.reconnect()
-        return jsonify(ok=True, url=url)
+    @app.post("/voice/ptt")
+    def voice_ptt():
+        if mock.voice_unit:
+            mock.voice_unit.ptt(bool((request.json or {}).get("down")))
+        return jsonify(ok=True)
 
-    @app.route("/voice/<path:sub>", methods=["GET", "POST"])
-    def voice_proxy(sub):
-        if not mock.link:
-            return jsonify(error="The voice app is not answering (mock: start me with --voice)."), 502
-        path = "/static/help.json" if sub == "help" else "/" + sub
-        if request.query_string:
-            path += "?" + request.query_string.decode()
-        try:
-            status, data = mock.link.request(request.method, path, request.get_json(silent=True) if request.method == "POST" else None)
-        except Exception as exc:
-            return jsonify(error=str(exc)), 502
-        return jsonify(data), status
+    @app.post("/voice/say")
+    def voice_say():
+        if not mock.voice_unit:
+            return jsonify(spoken=False, reason="voice is not running (mock: start me with --voice)")
+        spoken = mock.voice_unit.say(str((request.json or {}).get("text", "")))
+        return jsonify(spoken=spoken, reason=mock.voice_unit.latest.get("speech_reason", ""))
+
+    @app.get("/voice/devices")
+    def voice_devices():
+        if not mock.voice_unit:
+            return jsonify(input=[], output=[], voices=[])
+        return jsonify(**mock.voice_unit.latest.get("devices", {"input": [], "output": []}), voices=mock.voice_unit.voices())
 
     @app.post("/settings/voice")
     def settings_voice():
-        checks = {"voice_verbosity": lambda v: v in (0, 1, 2), "voice_persona": lambda v: v in ("A", "B"),
-                  "follow_up_s": lambda v: isinstance(v, (int, float)) and 0 <= v <= 30,
-                  "confirm_timeout_s": lambda v: isinstance(v, (int, float)) and 5 <= v <= 120, "map_ros": lambda v: isinstance(v, bool)}
-        for k, v in (request.json or {}).items():
-            if k not in checks or not checks[k](v):
-                return jsonify(error=f"{k}: {v!r} is not allowed."), 400
-            mock.settings[k] = v
-        return jsonify(ok=True, **{"verbosity": mock.settings["voice_verbosity"], "persona": mock.settings["voice_persona"],
-                                   "follow_up_s": mock.settings["follow_up_s"], "confirm_timeout_s": mock.settings["confirm_timeout_s"], "map_ros": mock.settings["map_ros"]})
+        body = request.json or {}
+        problem = config.voice_settings_ok(body)
+        if problem:
+            return jsonify(error=problem), 400
+        mock.voice.update(body)
+        if mock.voice_unit:
+            mock.voice_unit.update(body)
+        return jsonify(ok=True, voice=mock.voice)
 
     return app
+
+
+class LoopingFile:
+    """A WAV played at real speed, over and over: the microphone for page work without one."""
+
+    kind = "file"
+
+    def __init__(self, path):
+        self.path, self._running, self._src = path, False, None
+
+    def start(self):
+        self._running = True
+
+    def stop(self):
+        self._running = False
+        if self._src:
+            self._src.stop()
+
+    def backlog(self):
+        return 0
+
+    def frames(self):
+        from voice.audio import FileSource
+        while self._running:
+            self._src = FileSource(self.path, realtime=True, pad_end_s=1.0)
+            self._src.start()
+            yield from self._src.frames()
 
 
 if __name__ == "__main__":
@@ -677,8 +687,18 @@ if __name__ == "__main__":
     ap.add_argument("--port", type=int, default=8002)
     ap.add_argument("--rows", type=int, default=0, help="pad the capability list with this many undescribed interfaces")
     ap.add_argument("--think", type=float, default=3.5, help="the pretend model's think time, seconds")
-    ap.add_argument("--voice", metavar="URL", help="talk to a real voice app at this address, e.g. http://127.0.0.1:8100")
+    ap.add_argument("--voice", action="store_true", help="run the voice package on the microphone")
+    ap.add_argument("--voice-file", metavar="WAV", help="run the voice package on this clip, looped")
     args = ap.parse_args()
-    print(f"Mock console on http://localhost:{args.port}/stage (and / for the workbench). Nothing here is real"
-          + (f", except the voice app at {args.voice}." if args.voice else "."))
-    create_app(think_s=args.think, rows=args.rows, voice_url=args.voice).run(host="127.0.0.1", port=args.port, threaded=True)
+    app = create_app(think_s=args.think, rows=args.rows)
+    mock = app.config["mock"]
+    if args.voice or args.voice_file:
+        from voice import Voice
+        unit = Voice(mock.voice, on_state=mock.voice_state, on_final=mock.heard, on_timings=mock.voice_timings,
+                     on_idle=mock.voice_idle, on_error=lambda m: print("voice:", m),
+                     make_source=(lambda s: LoopingFile(args.voice_file)) if args.voice_file else None)
+        mock.attach_voice(unit)
+        unit.start()
+    print(f"Mock console on http://localhost:{args.port}/. Nothing here is real"
+          + (", except the voice package (microphone)." if args.voice else ", except the voice package on a clip." if args.voice_file else "."))
+    app.run(host="127.0.0.1", port=args.port, threaded=True)

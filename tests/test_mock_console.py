@@ -58,8 +58,8 @@ def test_no_rest_and_tour(client):
     client.post("/command", json={"text": "what can I do with MoveIt"})
     wait_until(lambda: client.get("/state").get_json()["lit"], timeout=5)
     assert client.get("/state").get_json()["said"]
-    assert client.post("/settings/voice", json={"voice_verbosity": 2}).status_code == 200
-    assert client.post("/settings/voice", json={"voice_verbosity": 9}).status_code == 400
+    assert client.post("/settings/voice", json={"verbosity": 2}).status_code == 200
+    assert client.post("/settings/voice", json={"verbosity": 9}).status_code == 400
 
 
 def test_heard_treats_spoken_words_as_the_console_does():
@@ -89,3 +89,31 @@ def test_listening_lamp_goes_back_to_idle_when_nothing_was_said():
     assert m.phase == "listening"
     m.voice_idle()
     assert m.phase == "idle"
+
+
+def test_mock_voice_routes_without_a_voice_unit(client):
+    assert client.post("/voice/ptt", json={"down": True}).status_code == 200
+    assert client.get("/voice/devices").get_json() == {"input": [], "output": [], "voices": []}
+    assert client.post("/voice/say", json={"text": "hi"}).get_json()["spoken"] is False
+    r = client.post("/settings/voice", json={"silence_ms": 900})
+    assert r.status_code == 200 and r.get_json()["voice"]["silence_ms"] == 900
+    assert client.post("/settings/voice", json={"silence_ms": 5}).status_code == 400
+    assert client.get("/state").get_json()["voice"]["silence_ms"] == 900
+    assert client.post("/voice/url", json={"url": "http://x"}).status_code == 404
+
+
+def test_mock_with_a_voice_unit_hears_a_clip(tmp_path):
+    pytest.importorskip("soundfile")
+    from voice import Voice
+    from tests.test_voice_pipeline import CountSTT, LevelVAD, ListSource, LoudTrigger, OnRelease, QuietFor, frames_of
+    app = mock_console.create_app(think_s=0.2)
+    mock = app.config["mock"]
+    unit = Voice(mock.voice, on_state=mock.voice_state, on_final=mock.heard, on_timings=mock.voice_timings, on_idle=mock.voice_idle,
+                 make_stages=lambda: (LoudTrigger(), LevelVAD(), QuietFor(), OnRelease(), CountSTT()),
+                 make_source=lambda s: ListSource(frames_of(("click", 1), ("speech", 31), ("silence", 31))),
+                 make_speaker=lambda v, on_speaking, out: (type("S", (), {"say": lambda self, t: True, "cancel": lambda self: None, "reason": ""})(),
+                                                            type("N", (), {"play": lambda self, n: True})()))
+    mock.attach_voice(unit)
+    unit.start(); unit.wait(5)
+    assert mock.messages and mock.messages[0]["via"] == "voice" and mock.messages[0]["text"].endswith("samples")
+    assert app.test_client().get("/state").get_json()["voice"]["final"].endswith("samples")
