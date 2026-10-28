@@ -9,8 +9,8 @@
 <link rel="stylesheet" href="/static/panels.css">
 <style>
   /* The stage: the hands-free page. Dark, big type, one panel for the loop on the left, the real 3D
-     view and the map on the right, what you would say at the bottom. Every setting of the workbench
-     is in the Settings pop-up, which is a light panel (the workbench's own colours) over the stage. */
+     view and the map on the right, what you would say at the bottom. Every setting is in
+     the Settings pop-up, a light panel over the stage. */
   :root {
     --bg: #0f1420; --panel: #161c2c; --line: #28324a; --ink: #f2f4f8; --muted: #8e99ab;
     --listen: #f5b400; --think: #7c83f5; --ask: #f49a62; --go: #4ade80; --no: #f87171; --idle: #4b5563;
@@ -82,7 +82,7 @@
   footer { flex: none; border-top: 1px solid var(--line); padding: 10px 22px 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   footer input { flex: 1 1 260px; min-width: 0; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; }
 
-  /* The settings pop-up: the workbench's panels, in the workbench's colours, over the stage */
+  /* The settings pop-up: a light panel over the stage */
   #settings { --bg: #e9edf1; --panel: #ffffff; --ink: #1b2430; --muted: #5d6b79; --line: #cfd6de; --action: #1d5fb3;
     --ok: #1e7b4e; --bad: #b42318; --gate: #b25e00; --gate-bg: #fff4e5; --you-bg: #e3ebf7;
     background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(94vw, 900px); max-height: 92vh; }
@@ -153,7 +153,7 @@
   <button id="stop-robot" class="danger" type="button" title="Halt the arm now, without waiting for the model">Stop robot</button>
 </footer>
 
-<!-- Every setting of the workbench, in one pop-up. The fragments and ids are the workbench's, so panels.js draws them. -->
+<!-- Every setting, in one pop-up; panels.js draws the panels by id. -->
 <dialog id="settings">
   <div class="shead"><h2>Settings</h2><button type="button" id="close-settings">Close</button></div>
   <div class="sbody">
@@ -194,14 +194,9 @@
           <button type="button" id="voice-off-btn">Off</button>
         </div>
         <span class="pill" id="voice-state">…</span>
+        <span class="note" id="voice-saved"></span>
       </div>
       <div class="alert" id="voice-alert" hidden></div>
-      <div class="row"><label>Rosa says <select id="s-verbosity"><option value="0">sounds only</option><option value="1">read-backs and results</option><option value="2">everything (prefaces, cancels)</option></select></label>
-        <label>in the words of <select id="s-persona"><option value="A">A · the technician</option><option value="B">B · the colleague</option></select></label>
-        <label>voice <select id="s-speech-voice"><option value="">(voice app not started)</option></select></label>
-        <button type="button" id="s-test-voice">Say "This is Rosa"</button></div>
-      <div class="row"><label>No wake word needed for <input type="number" id="s-follow" min="0" max="30" step="1" style="width:60px"> s after Rosa speaks</label>
-        <label>A confirm card waits <input type="number" id="s-timeout" min="5" max="120" step="5" style="width:60px"> s</label></div>
       <div class="live">
         <div class="meter" title="Microphone level"><div id="voice-level"></div></div>
         <div class="heard" id="voice-heard"><span class="empty-note">Nothing heard yet.</span></div>
@@ -211,29 +206,24 @@
           <span class="note" id="voice-action"></span>
         </div>
       </div>
-      <h3 class="sect">Voice app settings <span class="note" id="voice-saved"></span></h3>
-      <div id="voice-settings-body">
-        <div class="knob"><label for="voice-device">device</label><select id="voice-device"><option value="auto">auto</option><option value="cuda">cuda</option><option value="metal">metal</option><option value="cpu">cpu</option></select><div class="help">auto picks the best this computer has: cuda (NVIDIA), metal (Apple silicon), otherwise cpu</div></div>
-        <div id="voice-stages"></div>
-        <div class="row">
-          <label>Preset <select id="voice-preset"></select></label>
-          <button type="button" id="voice-preset-load">Load</button>
-          <input id="voice-preset-name" placeholder="new preset name" autocomplete="off">
-          <button type="button" id="voice-preset-save">Save as preset</button>
-        </div>
-      </div>
-      <h3 class="sect">Console side</h3>
-      <form id="voice-url-form" class="row">
-        <label for="voice-url">Voice app address</label>
-        <input id="voice-url" placeholder="http://127.0.0.1:8100" autocomplete="off">
-        <button type="submit">Test and save</button>
-        <span class="note" id="voice-url-note"></span>
-      </form>
-      <label class="row"><input type="checkbox" id="voice-confirm"> Let a spoken "confirm" answer the card <span class="note">(only "confirm" or "go ahead", as a whole utterance)</span></label>
-    </details>
-    <details class="sect">
-      <summary>Tools</summary>
-      <p class="note">Open on the robot's computer's own screen only.</p>
+      <h3 class="sect">Hearing</h3>
+      <div class="row"><label>Microphone <select id="s-input-device"><option value="">(default microphone)</option></select></label>
+        <span class="help">The list is this computer's; the Jabra headset in the lab.</span></div>
+      <div class="row"><label>The wake word fires at <input type="number" id="s-wake-threshold" min="0.1" max="0.9" step="0.05" style="width:64px"></label>
+        <span class="help">Lower hears "truffles" more easily and wakes by mistake more often. 0.5 to start.</span></div>
+      <div class="row"><label>You have finished after <input type="number" id="s-silence-ms" min="300" max="1500" step="50" style="width:70px"> ms of silence</label>
+        <span class="help">Shorter answers sooner; longer lets you pause mid-sentence. Hold to talk ignores this: let go when you are done.</span></div>
+      <label class="row"><input type="checkbox" id="voice-confirm"> Let a spoken "confirm" answer the card <span class="note">(only "confirm" or "go ahead", as a whole utterance; "no, …" cancels and runs the rest)</span></label>
+      <h3 class="sect">Speaking</h3>
+      <div class="row"><label><input type="checkbox" id="s-speech-enabled"> Rosa speaks</label>
+        <label>voice <select id="s-speech-voice"><option value="">(no voices in models/piper)</option></select></label>
+        <label>through <select id="s-output-device"><option value="">(default speaker)</option></select></label>
+        <button type="button" id="s-test-voice">Say "This is Rosa"</button></div>
+      <div class="row"><label><input type="checkbox" id="s-sounds-enabled"> The loop's sounds</label>
+        <label>Rosa says <select id="s-verbosity"><option value="0">sounds only</option><option value="1">read-backs and results</option><option value="2">everything</option></select></label>
+        <label>in the words of <select id="s-persona"><option value="A">A · the technician</option><option value="B">B · the colleague</option></select></label></div>
+      <div class="row"><label>No wake word needed for <input type="number" id="s-follow" min="0" max="30" step="1" style="width:60px"> s after Rosa speaks</label>
+        <label>A confirm card waits <input type="number" id="s-timeout" min="5" max="120" step="5" style="width:60px"> s</label></div>
     </details>
     <details class="sect caps help">
       <summary>What this system offers (<span id="caps-count">…</span>)</summary>
@@ -247,7 +237,7 @@
       <summary>Session</summary>
       <div class="row"><button id="reset" type="button" title="Make the model forget this conversation">New conversation</button>
         <button id="finish" type="button">Finish session</button>
-        <span class="note">The chat and the saved moves are on the <a href="/">workbench</a>.</span></div>
+        <span class="note">Finish writes the session table to <span class="mono">sessions/</span>.</span></div>
     </details>
   </div>
 </dialog>
@@ -368,9 +358,6 @@ function render(s) {
     $("suggest").querySelectorAll("button").forEach(b => b.onclick = () => say(b.textContent));
   }
   // The stage's own settings, when the pop-up is open.
-  for (const [id, key] of [["s-verbosity", "verbosity"], ["s-persona", "persona"], ["s-follow", "follow_up_s"], ["s-timeout", "confirm_timeout_s"]])
-    if (document.activeElement !== $(id)) $(id).value = s[key];
-  if (document.activeElement !== $("s-ros")) $("s-ros").checked = !!s.map_ros;
   panelsRefresh(s);
 }
 
@@ -396,24 +383,9 @@ $("btn-no").onclick = () => { if (pendingId) post("/confirm", {id: pendingId, ok
 // Stop halts the arm; if the model is still working on a command, it is given up too.
 $("stop-robot").onclick = () => post("/stop").then(() => lastState && lastState.busy ? fetch("/cancel", {method: "POST"}) : null).then(refresh);
 
-// The settings pop-up: the workbench's panels (panels.js) plus the stage's own four settings.
-$("open-settings").onclick = () => { $("settings").showModal(); loadVoiceSettings(); loadSpeechVoices(); };
+// The settings pop-up: the panels of panels.js; the voice form is filled when it opens.
+$("open-settings").onclick = () => { $("settings").showModal(); voiceKey = null; loadVoiceForm(); };
 $("close-settings").onclick = () => $("settings").close();
-const stageSetting = (id, key, read) => { $(id).onchange = e => post("/settings/voice", {[key]: read(e.target)}).then(refresh); };
-stageSetting("s-verbosity", "voice_verbosity", el => Number(el.value));
-stageSetting("s-persona", "voice_persona", el => el.value);
-stageSetting("s-follow", "follow_up_s", el => Number(el.value));
-stageSetting("s-timeout", "confirm_timeout_s", el => Number(el.value));
-stageSetting("s-ros", "map_ros", el => el.checked);
-async function loadSpeechVoices() {
-  try {
-    const [o, s] = await Promise.all([vapi("options"), vapi("settings")]);
-    const current = (s.speech || {}).voice || "";
-    $("s-speech-voice").innerHTML = (o.voices || []).map(v => `<option value="${esc(v)}" ${v === current ? "selected" : ""}>${esc(v)}</option>`).join("") || `<option value="">(no voices in models/piper)</option>`;
-  } catch { $("s-speech-voice").innerHTML = `<option value="">(voice app not started)</option>`; }
-}
-$("s-speech-voice").onchange = e => { if (e.target.value) vapi("settings", "POST", {speech: {voice: e.target.value}}).catch(err => voiceProblem("Voice: " + err.message)); };
-$("s-test-voice").onclick = () => vapi("say", "POST", {text: "This is Rosa."}).catch(err => voiceProblem("Voice: " + err.message));
 RosaMap.mount($("map"), {onNode: id => say(`what can I do with ${RosaMap.groupName(id)}`), onOffer: row => say(row.say)});
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("settings").open) post("/stop").then(refresh); });
 

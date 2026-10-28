@@ -106,3 +106,12 @@ def test_map_select_hides_the_undescribed_by_default(tmp_path):
     assert out["plain"]["groups"] == ["multiview_scan", "moveit"] and out["plain"]["offers"] == 2
     assert out["ros"]["offers"] == 3                                   # the described group's undescribed row joins it
     assert len(out["ros"]["collapsed"]) == 8 and out["ros"]["collapsed"][0].startswith("controller_")
+
+
+def test_the_voice_form_has_no_generated_parts():
+    page = (STATIC / "stage.html").read_text()
+    text = page + (STATIC / "panels.js").read_text()
+    for gone in ("voice-stages", "voice-preset", "voice-url", "renderVoiceStages", "vapi(", "voice-settings-body", "workbench"):
+        assert gone not in text, gone
+    for there in ("s-input-device", "s-wake-threshold", "s-silence-ms", "s-output-device", "s-speech-enabled", "s-sounds-enabled"):
+        assert f'id="{there}"' in page, there

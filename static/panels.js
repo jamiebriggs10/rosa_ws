@@ -1,5 +1,5 @@
 // The settings panels of the stage (stage.html): the requests helper, the robot-connection ladder,
-// the voice section, the safety limits, the session buttons, the model menu, the Ollama address and
+// the voice section (the live part and the form), the safety limits, the session buttons, the model menu, the Ollama address and
 // the capabilities panel. Each renderer looks its elements up by id.
 const $ = id => document.getElementById(id);
 let lastState = null, ollamaFilled = false;
@@ -87,208 +87,96 @@ if ($("robot-mode-sim")) $("robot-mode-sim").onclick = () => robotSetMode("sim")
 if ($("robot-mode-real")) $("robot-mode-real").onclick = () => robotSetMode("real");
 if ($("robot-recheck")) $("robot-recheck").onclick = () => robotSetMode(robotMode);
 
-// Voice control. The state comes from /state.voice once a second (the header pill, and the live
-// part of the dialog when it is open). The settings are fetched from the voice app, through the
-// console's /voice/* routes, when the dialog opens, and redrawn only then and after an option
-// changes, so a poll never pulls a control out from under a click.
-let voiceOn = false, voiceKey = null, voiceUrlFilled = false, voiceSettings = null, voiceOptions = null;
-let voiceMessage = "";       // the voice app's last refusal (a 400 on a setting, say); shown until the next success
-let voiceHelp = {stages: {}, options: {}, knobs: {}};         // plain-English help from the voice app's help.json
-const VOICE_STAGES = ["trigger", "vad", "endpoint", "stt"];
-const VOICE_STAGE_TITLES = {trigger: "when to start listening", vad: "is someone speaking?",
-                            endpoint: "have you finished?", stt: "speech-to-text"};
+// ---- voice ----
+// /state.voice is the voice package's latest news merged with the voice block of the settings. The
+// live part of the Voice section is redrawn when it changes; the form is filled when the pop-up
+// opens (loadVoiceForm), so a value being typed is never overwritten by a poll.
+let voiceOn = false, voiceKey = null, voiceMessage = "";
 const VOICE_STATES = {idle: ["ok", "idle"], armed: ["wait", "armed, waiting for speech"],
                       listening: ["wait", "listening"], finalising: ["busy", "finishing"]};
-const VOICE_ACTIONS = {sent: "sent to the model", stopped: "stopped the arm", swallowed: "already stopped",
-                       confirmed: "confirmed the move", cancelled: "cancelled the move",
-                       busy: "not sent: the model was busy", off: "heard, but voice is off", empty: "", ignored: ""};
+const VOICE_ACTIONS = {sent: "sent to the model", stopped: "stopped the arm", confirmed: "confirmed the move",
+                       cancelled: "cancelled the move", held: "cancelled; the correction runs next",
+                       busy: "not sent: the model was busy", off: "heard, but voice is off", empty: ""};
 function voiceLampText(v) {
   if (!v.on) return ["off", "Voice off"];
-  if (!v.running) return ["off", "Voice on, voice app not started"];
+  if (v.error) return ["off", "Voice on, not working"];
+  if (!v.running) return ["wait", "Voice on, " + (v.loading || "starting…")];
   const [lamp, word] = VOICE_STATES[v.state] || ["ok", v.state || "ready"];
   return [lamp, "Voice on, " + word];
 }
 function showVoice(v) {
   voiceOn = !!v.on;
-  const [lamp, text] = voiceLampText(v);
-  if (!voiceUrlFilled && v.url && $("voice-url")) { $("voice-url").value = v.url; voiceUrlFilled = true; }
   const dlg = $("settings");
   if (!dlg || !dlg.open) return;
   const key = JSON.stringify([v, voiceMessage]);
   if (key === voiceKey) return;
   voiceKey = key;
+  const [lamp, text] = voiceLampText(v);
   $("voice-on-btn").className = v.on ? "sel" : ""; $("voice-off-btn").className = v.on ? "" : "sel";
   const pill = $("voice-state"); pill.className = "pill " + lamp; pill.textContent = text.replace("Voice on, ", "").replace("Voice ", "");
+  const problem = voiceMessage || v.error || "";
   const alert = $("voice-alert");
-  const problem = voiceMessage || (!v.running
-    ? `The voice app is not answering at ${v.url}. Start it (start.sh with "voice_start" set, or its app.py); this page finds it by itself.`
-    : (v.error || ""));
   alert.hidden = !(problem || v.loading);
   alert.className = "alert " + (problem ? "bad" : "wait"); alert.textContent = problem || v.loading || "";
   $("voice-level").style.width = Math.min(100, Math.round((v.level || 0) * 400)) + "%";
-  const heard = $("voice-heard");
-  if (v.partial) heard.innerHTML = `<span class="partial">${esc(v.partial)}…</span>`;
-  else if (v.final) heard.textContent = v.final;
-  else heard.innerHTML = '<span class="empty-note">Nothing heard yet.</span>';
-  $("voice-felt").textContent = v.felt_ms != null && !v.partial ? `felt delay ${Math.round(v.felt_ms)} ms` : "";
-  $("voice-action").textContent = v.final && !v.partial ? (VOICE_ACTIONS[v.action] ?? v.action ?? "") : "";
+  $("voice-heard").innerHTML = v.final ? esc(v.final) : '<span class="empty-note">Nothing heard yet.</span>';
+  $("voice-felt").textContent = v.felt_ms != null ? `felt delay ${Math.round(v.felt_ms)} ms` : "";
+  $("voice-action").textContent = v.final ? (VOICE_ACTIONS[v.action] ?? v.action ?? "") : "";
   $("voice-ptt").disabled = !(v.on && v.running);
   $("voice-confirm").checked = !!v.confirm;
-  for (const stage of VOICE_STAGES) {                        // "loading…" on the stage whose model is loading
-    const badge = $("voice-load-" + stage);
-    if (badge) badge.style.display = v.loading && v.loading.includes(stage) ? "" : "none";
-  }
 }
-async function setVoice(on) {
-  voiceKey = null;
-  await post("/voice/on", {on});                             // the note (app not answering) shows in the dialog's alert
-  refresh();
-}
-// mk("div", {className: "x", on: {click: fn}}, child, ...) builds an element; text only, so no HTML injection.
-function mk(tag, attrs, ...kids) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (k === "on") for (const [ev, fn] of Object.entries(v)) node.addEventListener(ev, fn);
-    else if (k in node && k !== "list") node[k] = v; else node.setAttribute(k, v);
-  }
-  for (const kid of kids) if (kid !== "" && kid != null) node.append(kid);
-  return node;
-}
-async function vapi(path, method, body) {                    // one request to the voice app, via the console
-  const r = await fetch("/voice/" + path, {method: method || "GET", headers: body ? {"Content-Type": "application/json"} : {},
-                                            body: body ? JSON.stringify(body) : undefined});
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) { const e = new Error(data.error || r.statusText); e.status = r.status; throw e; }
-  return data;
-}
-// A refusal from the voice app stays on screen (through the one-second redraws) until the next success.
+async function setVoice(on) { voiceKey = null; await post("/voice/on", {on}); refresh(); }
+if ($("voice-on-btn")) $("voice-on-btn").onclick = () => setVoice(true);
+if ($("voice-off-btn")) $("voice-off-btn").onclick = () => setVoice(false);
+if ($("voice-confirm")) $("voice-confirm").onchange = e => post("/voice/confirm", {on: e.target.checked}).then(() => { voiceKey = null; refresh(); });
 function voiceProblem(msg) { voiceMessage = msg; voiceKey = null; if (lastState && lastState.voice) showVoice(lastState.voice); }
-function voiceFine() { if (voiceMessage) { voiceMessage = ""; voiceKey = null; } }
-async function loadVoiceSettings() {
-  try {
-    const [o, s, help, presets] = await Promise.all([vapi("options"), vapi("settings"), vapi("help").catch(() => ({})),
-                                                     vapi("presets").catch(() => [])]);
-    voiceFine();
-    voiceOptions = o.options; voiceSettings = s;
-    voiceHelp = {stages: help.stages || {}, options: help.options || {}, knobs: help.knobs || {}};
-    renderVoiceStages();
-    const sel = $("voice-preset"); sel.innerHTML = "";
-    for (const p of presets) sel.append(mk("option", {value: p}, p));
-    $("voice-settings-body").hidden = false;
-  } catch (e) {
-    $("voice-settings-body").hidden = true;
-    voiceProblem("Cannot read the voice settings: " + e.message);
-  }
-}
-// Changes are gathered for 400 ms (so a slider or typing sends once), then posted as one patch.
-let voicePatch = {}, voiceTimer = null;
-function voiceChange(path, value) {                          // path like ["stt", "parakeet", "model"]
-  let node = voicePatch;
-  path.slice(0, -1).forEach(k => { node = node[k] ||= {}; });
-  node[path[path.length - 1]] = value;
-  clearTimeout(voiceTimer);
-  voiceTimer = setTimeout(voiceFlush, 400);
-}
-async function voiceFlush() {
-  const body = voicePatch; voicePatch = {};
-  try {
-    voiceSettings = await vapi("settings", "POST", body);
-    voiceFine();
-    $("voice-saved").textContent = "saved, applies to the next thing you say";
-    setTimeout(() => { $("voice-saved").textContent = ""; }, 3000);
-  } catch (e) { voiceProblem("Voice settings: " + e.message); loadVoiceSettings(); }
-}
-function knobInput(path, spec, value) {
-  const send = v => voiceChange(path, v);
-  const cur = value === undefined ? spec.default : value;
-  switch (spec.type) {
-    case "bool": return mk("input", {type: "checkbox", checked: !!cur, on: {change: e => send(e.target.checked)}});
-    case "choice": return mk("select", {on: {change: e => send(e.target.value)}},
-      ...(spec.choices || []).map(c => mk("option", {value: c, selected: c === cur}, String(c))));
-    case "int": case "float": {
-      const isInt = spec.type === "int";
-      return mk("input", {type: "number", value: cur ?? "", min: spec.min ?? "", max: spec.max ?? "", step: spec.step ?? (isInt ? 1 : "any"),
-        on: {change: e => { const n = isInt ? parseInt(e.target.value, 10) : parseFloat(e.target.value); if (!isNaN(n)) send(n); }}});
-    }
-    case "list": return mk("input", {type: "text", value: (cur || []).join(", "),
-      on: {change: e => send(e.target.value.split(",").map(s => s.trim()).filter(Boolean))}});
-    default: return mk("input", {type: "text", value: cur ?? "", on: {change: e => send(e.target.value)}});
-  }
-}
-function explain(entry, label) {                             // a folded "What is this?" from one help.json entry
-  if (!entry || !entry.what) return "";
-  const body = mk("div", {}, mk("p", {}, entry.what));
-  if (entry.higher) body.append(mk("p", {}, mk("b", {}, "Turn it up: "), entry.higher));
-  if (entry.lower) body.append(mk("p", {}, mk("b", {}, "Turn it down: "), entry.lower));
-  if (entry.start) body.append(mk("p", {}, mk("b", {}, "Start with: "), entry.start));
-  return mk("details", {className: "explain"}, mk("summary", {}, label || "What is this?"), body);
-}
-function knobRow(path, name, spec, value) {
-  return mk("div", {className: "knob"}, mk("label", {}, name), knobInput(path, spec, value),
-    spec.help ? mk("div", {className: "help"}, spec.help) : "", explain(voiceHelp.knobs[path.join(".")]));
-}
-const STT_COMMON = {                                         // knobs every speech-to-text engine shares; /options does not list them
-  mode: {type: "choice", choices: ["batch", "streaming"], help: "batch = turn the words into text after you finish; streaming = live text while you speak"},
-  partial_every_ms: {type: "int", min: 100, max: 5000, step: 100, help: "how often live text is produced"},
-  language: {type: "str"},
-  prompt: {type: "str", help: "words the engine should expect (the robot's name, units, directions)"},
+
+// The form: one control per key of the voice block, each change posted on its own to /settings/voice.
+const VOICE_FORM = [["s-input-device", "input_device", "name"], ["s-output-device", "output_device", "name"],
+                    ["s-speech-voice", "speech_voice", "text"], ["s-wake-threshold", "wake_threshold", "number"],
+                    ["s-silence-ms", "silence_ms", "int"], ["s-speech-enabled", "speech_enabled", "bool"],
+                    ["s-sounds-enabled", "sounds_enabled", "bool"], ["s-verbosity", "verbosity", "int"],
+                    ["s-persona", "persona", "text"], ["s-follow", "follow_up_s", "number"],
+                    ["s-timeout", "confirm_timeout_s", "number"], ["s-ros", "map_ros", "bool"]];
+const VOICE_READ = {name: el => el.value || null, number: el => Number(el.value), int: el => parseInt(el.value, 10),
+                    bool: el => el.checked, text: el => el.value};
+for (const [id, key, kind] of VOICE_FORM) if ($(id)) $(id).onchange = async e => {
+  const r = await fetch("/settings/voice", {method: "POST", headers: {"Content-Type": "application/json"},
+                                            body: JSON.stringify({[key]: VOICE_READ[kind](e.target)})});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { voiceProblem(data.error || "That setting was not saved."); return; }
+  voiceMessage = ""; $("voice-saved").textContent = "saved"; setTimeout(() => { $("voice-saved").textContent = ""; }, 2000);
+  refresh();
 };
-function renderVoiceStages() {
-  const root = $("voice-stages");
-  root.replaceChildren();
-  $("voice-device").value = voiceSettings.device || "auto";
-  for (const stage of VOICE_STAGES) {
-    const opts = voiceOptions[stage] || {}, cfg = voiceSettings[stage] || {};
-    const sel = mk("select", {className: "use", on: {change: e => {
-      cfg.use = e.target.value; voiceChange([stage, "use"], cfg.use); renderVoiceStages(); }}});
-    for (const [name, o] of Object.entries(opts)) {
-      const op = mk("option", {value: name, selected: name === cfg.use}, name + (o.supported ? "" : " (unavailable here)"));
-      if (!o.supported) { op.disabled = true; op.title = o.reason || "not supported on this computer"; }
-      sel.append(op);
-    }
-    const box = mk("div", {className: "stage"},
-      mk("h4", {}, stage, mk("small", {}, VOICE_STAGE_TITLES[stage] || ""),
-        mk("span", {id: "voice-load-" + stage, className: "badge", style: "display:none"}, "loading…")),
-      explain(voiceHelp.stages[stage], "What is this?"), sel,
-      explain(voiceHelp.options[`${stage}.${cfg.use}`], "About this option"));
-    if (stage === "stt")
-      for (const [k, spec] of Object.entries(STT_COMMON)) box.append(knobRow([stage, k], k, spec, cfg[k]));
-    // "both" (wake word or push-to-talk) uses the wake word's knobs, kept under trigger.openwakeword.
-    const owner = (stage === "trigger" && cfg.use === "both") ? "openwakeword" : cfg.use;
-    const o = opts[owner];
-    if (o) for (const [k, spec] of Object.entries(o.knobs || {})) box.append(knobRow([stage, owner, k], k, spec, (cfg[owner] || {})[k]));
-    root.append(box);
+function fillSelect(id, names, current, none) {
+  const sel = $(id);
+  sel.innerHTML = `<option value="">${none}</option>` + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  if (current && !names.includes(current)) sel.append(Object.assign(document.createElement("option"), {value: current, textContent: current}));
+  sel.value = current || "";
+}
+async function loadVoiceForm() {
+  const v = (lastState && lastState.voice) || {};
+  let d = {input: [], output: [], voices: []};
+  try { d = await (await fetch("/voice/devices")).json(); } catch {}
+  fillSelect("s-input-device", d.input || [], v.input_device, "(default microphone)");
+  fillSelect("s-output-device", d.output || [], v.output_device, "(default speaker)");
+  fillSelect("s-speech-voice", d.voices || [], v.speech_voice, "(no voices in models/piper)");
+  for (const [id, key, kind] of VOICE_FORM) {
+    if (!$(id) || kind === "name" || key === "speech_voice" || v[key] === undefined) continue;
+    if (kind === "bool") $(id).checked = !!v[key]; else $(id).value = v[key];
   }
 }
-if ($("voice-device")) $("voice-device").onchange = e => voiceChange(["device"], e.target.value);
-if ($("voice-preset-load")) $("voice-preset-load").onclick = async () => {
-  const name = $("voice-preset").value;
-  if (!name) return;
-  try { voiceSettings = await vapi(`presets/${name}/load`, "POST", {}); renderVoiceStages(); $("voice-saved").textContent = `preset ${name} loaded`; }
-  catch (e) { voiceProblem("Preset: " + e.message); }
-};
-if ($("voice-preset-save")) $("voice-preset-save").onclick = async () => {
-  // Presets used for reported results must not change by accident: replacing one takes a second press.
-  const btn = $("voice-preset-save"), name = $("voice-preset-name").value.trim();
-  if (!name) return;
-  try {
-    await vapi(`presets/${name}` + (btn.dataset.confirm === name ? "?overwrite=1" : ""), "POST", {});
-  } catch (e) {
-    if (e.status === 409 && btn.dataset.confirm !== name) { btn.dataset.confirm = name; btn.textContent = "Press again to replace it"; voiceProblem(e.message); return; }
-    voiceProblem("Preset: " + e.message); return;
-  }
-  delete btn.dataset.confirm; btn.textContent = "Save as preset";
-  $("voice-saved").textContent = `preset ${name} saved`;
-  loadVoiceSettings();
-};
-// Hold to talk: down and up go to the voice app. Let go anywhere (leave, blur, close) so the
+if ($("s-test-voice")) $("s-test-voice").onclick = () =>
+  post("/voice/say", {text: "This is Rosa."}).then(r => { if (!r.spoken) voiceProblem("Rosa cannot speak: " + (r.reason || "no reason given")); });
+
+// Hold to talk: down and up go to the voice package. Let go anywhere (leave, blur, close) so the
 // microphone is never left open.
 let pttHeld = false;
 function ptt(down) {
   if (pttHeld === down || (down && $("voice-ptt").disabled)) return;
   pttHeld = down;
   $("voice-ptt").classList.toggle("held", down);
-  fetch(`/voice/ptt/${down ? "down" : "up"}`, {method: "POST"}).catch(() => {});
+  fetch("/voice/ptt", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({down})}).catch(() => {});
 }
 const pttBtn = $("voice-ptt");
 if (pttBtn) {
@@ -297,16 +185,6 @@ if (pttBtn) {
   window.addEventListener("blur", () => ptt(false));
   $("settings").addEventListener("close", () => ptt(false));
 }
-if ($("voice-url-form")) $("voice-url-form").onsubmit = async e => {
-  e.preventDefault();
-  const note = $("voice-url-note"); note.textContent = "testing…";
-  const r = await fetch("/voice/url", {method: "POST", headers: {"Content-Type": "application/json"},
-                                       body: JSON.stringify({url: $("voice-url").value.trim()})});
-  const data = await r.json().catch(() => ({}));
-  note.textContent = r.ok ? `saved: ${data.url}` : (data.error || "Something went wrong");
-  if (r.ok) { voiceKey = null; setTimeout(loadVoiceSettings, 1500); }
-};
-if ($("voice-confirm")) $("voice-confirm").onchange = e => post("/voice/confirm", {on: e.target.checked}).then(() => { voiceKey = null; refresh(); });
 
 // ---- the safety limits ----
 // The safety limits bar: what the safety layer currently allows, and a form to change it.
