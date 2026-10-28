@@ -904,3 +904,35 @@ def test_a_question_from_the_model_is_spoken_and_opens_the_follow_up_window(clie
     s = client.get("/state").get_json()
     assert s["phase"] == "follow" and s["follow_until_s"] > 0 and recorder.followup_calls[-1] > 0
     assert recorder.say_calls[-1] == "Keep x at 15.7?"
+
+
+def test_a_typed_stop_word_halts_without_the_model(client, voice_on):
+    assert client.post("/command", json={"text": "Stop!"}).status_code == 200
+    assert voice_on.calls == 1 and not web_console.console.busy
+    assert client.get("/state").get_json()["messages"][-1]["text"].startswith("Stop sent")
+
+
+def test_a_narrated_reply_is_replaced_by_the_tools_own_words(client):
+    def move():
+        robot_tools.events.append({"tool": "move_by", "args": {"dx": 0, "dy": 0, "dz": 5}, "outcome": "done",
+                                   "message": "Done. The tool is now at x=15.0, y=-63.4, z=83.5 cm."})
+        return "I called the move_by tool with the parameters dx=0, dy=0, dz=5 and it returned the result."
+    client.agent.action = move
+    client.post("/command", json={"text": "up five"})
+    wait_until(lambda: not web_console.console.busy)
+    m = client.get("/state").get_json()["messages"][-1]
+    assert m["text"] == "Done. The tool is now at x=15.0, y=-63.4, z=83.5 cm."
+    assert web_console.console.records[-1]["reply"].startswith("I called")      # the evaluation keeps the model's own words
+
+
+def test_a_claim_without_a_tool_call_is_flagged(client, recorder):
+    client.agent.action = lambda: "The tool is now at x 14.8, y -68.5, z 78.8 cm."       # nothing was called
+    client.post("/command", json={"text": "nudge it left"})
+    wait_until(lambda: not web_console.console.busy)
+    m = client.get("/state").get_json()["messages"][-1]
+    assert m["text"].startswith("Nothing was done") and "x 14.8" in m["text"]
+    assert recorder.say_calls[-1].startswith("Nothing was done")
+    client.agent.action = lambda: "Keep z at 78.8?"                                       # a question is not a claim
+    client.post("/command", json={"text": "go to x forty"})
+    wait_until(lambda: not web_console.console.busy)
+    assert client.get("/state").get_json()["messages"][-1]["text"] == "Keep z at 78.8?"

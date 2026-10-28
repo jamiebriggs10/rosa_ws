@@ -204,6 +204,10 @@ class Console:
         the chat and the session table show when it differs from what the model is sent."""
         if not self.busy and self.self_question(text, via):
             return True
+        if via != "voice" and words.is_stop(text) and not self.busy:
+            self.messages.append({"who": "you", "text": text})     # a typed "stop" is the red button, not a question for the model
+            self.stop()
+            return True
         return self._start(shown if shown is not None else text, self._ask_model, text, via)
 
     # -- questions about the console itself: the map's tour, answered without the model --------
@@ -354,13 +358,14 @@ class Console:
         events = list(robot_tools.events)
         self._remember_moves(events)
         total = round(time.time() - t0, 1)
-        self.messages.append({"who": "robot", "text": reply, "events": events, "total_s": total,
+        shown_reply = tidy_reply(reply, events)
+        self.messages.append({"who": "robot", "text": shown_reply, "events": events, "total_s": total,
                               "command": command})
         end = END_PHASE.get(events[-1]["outcome"], "done") if events else "done"
         if events:
             self._last_event = events[-1]
         self.set_phase(end)
-        self._announce_end(end, events, reply)
+        self._announce_end(end, events, shown_reply)
         record = {"time": datetime.datetime.now().strftime("%H:%M:%S"), "model": config.MODEL,
                   "think": config.THINK, "command": shown_text, "via": via or "typed", "events": events,
                   "total_s": total, "reply": reply, "phases": list(self._phases)}
@@ -618,6 +623,24 @@ class Console:
                         f"{calls} | {first} | {motion} | {r['total_s']} s | {reply} |")
         path.write_text("\n".join(rows) + "\n")
         return {"path": str(path), "records": self.records}
+
+
+_NARRATED = re.compile(r"^\s*I (?:called|used|invoked|ran) the \w+ tool\b", re.I)
+_CLAIMED = re.compile(r"\b(?:is now at|are now at|now at x|has been (?:stopped|moved)|have moved|I (?:have )?moved|the move was refused)\b", re.I)
+
+
+def tidy_reply(reply, events):
+    """What the page shows for the model's reply. Small models often narrate ("I called the move_by
+    tool ... and it returned the result") instead of answering; then the tool's own message is
+    the better reply. Worse, they sometimes claim a move or a stop without having called any tool;
+    then the reply is shown with a plain warning, so nobody believes the arm moved. The record
+    keeps the model's own words for the evaluation."""
+    reply = str(reply)
+    if events and _NARRATED.match(reply) and events[-1].get("message"):
+        return events[-1]["message"]
+    if not events and _CLAIMED.search(reply) and not reply.rstrip().endswith("?"):
+        return f"Nothing was done: the model answered without calling a tool. It said: {reply}"
+    return reply
 
 
 def timings(record):
