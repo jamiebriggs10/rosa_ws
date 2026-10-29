@@ -98,19 +98,20 @@ source "$ROS"
 set -u
 # shellcheck disable=SC2086
 [ -x "$DIR/venv/bin/python" ] || python3 -m venv --system-site-packages $VENV_OPTS "$DIR/venv"
+"$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check -r "$DIR/requirements.txt"
 if [ "$GPU" = 1 ]; then
-  # onnxruntime-gpu replaces onnxruntime (same import name, CUDA build) for Silero and the
-  # wake word; the two cannot be installed together, so the CPU one is left out and removed.
-  grep -v '^onnxruntime' "$DIR/requirements.txt" | "$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check -r /dev/stdin
-  "$DIR/venv/bin/python" -m pip uninstall -q -y onnxruntime 2>/dev/null || true
-  "$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check 'onnxruntime-gpu>=1.20'
-  echo "  onnxruntime-gpu (NVIDIA card found)"
-else
-  "$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check -r "$DIR/requirements.txt"
+  # Silero and the wake word run on the GPU with onnxruntime-gpu, the CUDA build of the same
+  # package. openwakeword depends on the CPU one by name, so that stays registered (or pip
+  # would put it back at every update) and the GPU build of the same version is laid over its
+  # files; the GPU wheel holds everything the CPU one does, plus the CUDA provider.
+  ORT="$("$DIR/venv/bin/python" -c 'import importlib.metadata as m; print(m.version("onnxruntime"))')"
+  "$DIR/venv/bin/python" -m pip install -q --disable-pip-version-check --force-reinstall --no-deps "onnxruntime-gpu==$ORT"
+  echo "  onnxruntime-gpu $ORT (NVIDIA card found)"
 fi
 
 say "Voice models (in $DIR/models; fetched once, about 700 MB the first time)"
-(cd "$DIR" && "$DIR/venv/bin/python" -m voice.models) || echo "  Could not fetch them (no network?). Voice will say so on the page; run  $DIR/venv/bin/python -m voice.models  later."
+(cd "$DIR" && "$DIR/venv/bin/python" -c 'from voice import models; models.download_all()') \
+  || echo "  Could not fetch them (no network?). Voice will say so on the page; run  $DIR/venv/bin/python -m voice.models  later."
 
 if [ "$OLLAMA" = 1 ]; then
   say "Ollama on this computer"
