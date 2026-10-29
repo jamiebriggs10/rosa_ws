@@ -12,7 +12,54 @@ function panelsRefresh(s) {
   showLimits(s);
   if (s.robot) showRobot(s.robot, !!s.local);
   if (s.voice) showVoice(s.voice);
+  showViews(s);
 }
+
+// ---- the World panel's tabs: Rosa's view, or Lichtblick (the engineer's view) in an iframe ----
+// Lichtblick renders continuously, so its iframe exists only while its tab is chosen (the browser
+// shares the GPU with Ollama). Its address comes from the settings, with "localhost" read as this
+// page's host, and the foxglove_bridge address is this page's host too: the bridge runs where the
+// console runs. The tab chosen is remembered in this browser.
+let lichtblickFilled = false, viewChosen = "world";
+try { viewChosen = localStorage.getItem("rosa-view") || "world"; } catch { /* no storage: the World tab */ }
+function lichtblickAddress(url) {
+  const host = location.hostname || "localhost";
+  const base = url.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/, "//" + host);
+  return `${base}/?ds=foxglove-websocket&ds.url=${encodeURIComponent(`ws://${host}:8765`)}`;
+}
+function showViews(s) {
+  const lb = s.lichtblick || {url: "", up: false}, engineer = $("engineer");
+  if (!lichtblickFilled && $("lichtblick-url")) { $("lichtblick-url").value = lb.url; lichtblickFilled = true; }
+  if (!engineer) return;
+  const want = viewChosen === "lichtblick" && !!lb.url;
+  $("view-lichtblick").hidden = !lb.url;
+  $("view-world").classList.toggle("on", !want); $("view-lichtblick").classList.toggle("on", want);
+  $("view-world").setAttribute("aria-selected", String(!want)); $("view-lichtblick").setAttribute("aria-selected", String(want));
+  engineer.parentElement.classList.toggle("lb", want);
+  engineer.hidden = !want;
+  const frame = engineer.querySelector("iframe");
+  if (!want && frame) frame.remove();
+  if (want && !frame && lb.up) {                       // once mounted it stays, whatever a later check says
+    const f = document.createElement("iframe"); f.src = lichtblickAddress(lb.url); f.title = "Lichtblick"; engineer.appendChild(f);
+  }
+  $("engineer-note").textContent = want && !lb.up && !engineer.querySelector("iframe")
+    ? `Lichtblick is not answering at ${lb.url}. start.sh starts it (Docker, port 8081); the address is under Settings › Engineer's view.` : "";
+}
+for (const [id, name] of [["view-world", "world"], ["view-lichtblick", "lichtblick"]]) if ($(id)) $(id).onclick = () => {
+  viewChosen = name;
+  try { localStorage.setItem("rosa-view", name); } catch { /* fine */ }
+  if (lastState) showViews(lastState);
+};
+if ($("lichtblick-form")) $("lichtblick-form").onsubmit = async e => {
+  e.preventDefault();
+  const note = $("lichtblick-note");
+  note.textContent = "Saving…";
+  const r = await fetch("/lichtblick", {method: "POST", headers: {"Content-Type": "application/json"},
+                                        body: JSON.stringify({url: $("lichtblick-url").value.trim()})});
+  const d = await r.json();
+  note.textContent = r.ok ? (d.url ? `Saved. The tab shows ${d.url} once it answers.` : "Saved: the Lichtblick tab is hidden.") : d.error;
+  if (r.ok) { $("lichtblick-url").value = d.url; refresh(); }
+};
 
 // ---- requests and small helpers ----
 async function post(url, body) {

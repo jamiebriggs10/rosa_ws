@@ -50,6 +50,10 @@ if ! dpkg -s ros-humble-moveit >/dev/null 2>&1; then
   echo "Warning: ros-humble-moveit is not installed. The agent moves the arm through MoveIt, so install it"
   echo "         (sudo apt install ros-humble-moveit) or make sure your robot's workspace provides it."
 fi
+if ! dpkg -s ros-humble-foxglove-bridge >/dev/null 2>&1; then
+  echo "Warning: ros-humble-foxglove-bridge is not installed, so the console's Lichtblick tab will have no data."
+  echo "         (sudo apt install ros-humble-foxglove-bridge; setup-machine.sh installs it too.)"
+fi
 
 say "Getting the code into $DIR"
 if [ -d "$DIR/.git" ]; then

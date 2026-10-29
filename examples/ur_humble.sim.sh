@@ -20,6 +20,14 @@ dash() {
   printf '%s\nquit\n' "$1" | timeout 8 nc "$URSIM_IP" 29999 | tr -d '\r' | grep -v -E '^(Connected|Disconnected)' || true
 }
 
+# foxglove_bridge feeds the console's Lichtblick tab (every topic, frame and mesh over one
+# WebSocket, port 8765). Skipped, with a line in the log, when the package is not installed.
+if ros2 pkg prefix foxglove_bridge >/dev/null 2>&1; then
+  ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765 > "$HOME/bridge.log" 2>&1 &
+else
+  echo "[bridge] foxglove_bridge is not installed (sudo apt install ros-humble-foxglove-bridge): the Lichtblick tab will have no data"
+fi
+
 echo "[sim] 1/3 URSim"
 # A leftover container from last time would hold the address, so remove it first. When this
 # script is stopped the container is removed too.

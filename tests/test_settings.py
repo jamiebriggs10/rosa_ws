@@ -96,3 +96,17 @@ def test_speech_voice_is_a_plain_file_name():
     assert config.voice_settings_ok({"speech_voice": "en_GB-alan-medium"}) is None
     assert "speech_voice" in config.voice_settings_ok({"speech_voice": "../../etc/x"})
     assert "speech_voice" in config.voice_settings_ok({"speech_voice": ""})
+
+
+def test_lichtblick_address_is_applied_and_may_be_empty(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "LICHTBLICK_URL", "http://localhost:8081")
+    f = tmp_path / "s.json"
+    f.write_text(json.dumps({"lichtblick_url": "http://10.0.0.5:8081/"}))
+    config.apply_settings(config.load_settings(f))
+    assert config.LICHTBLICK_URL == "http://10.0.0.5:8081"
+    f.write_text(json.dumps({"lichtblick_url": "nonsense"}))
+    config.apply_settings(config.load_settings(f))
+    assert config.LICHTBLICK_URL == "http://10.0.0.5:8081"
+    f.write_text(json.dumps({"lichtblick_url": ""}))
+    config.apply_settings(config.load_settings(f))
+    assert config.LICHTBLICK_URL == ""

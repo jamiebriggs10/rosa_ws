@@ -59,6 +59,14 @@
   .right { min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1.1fr); gap: 12px; }
   .world, .mapbox { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; position: relative; overflow: hidden; min-height: 180px; }
   .world .k, .mapbox .k { position: absolute; top: 8px; left: 12px; font-weight: 600; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); z-index: 2; pointer-events: none; }
+  /* The World panel's two tabs: Rosa's view, or Lichtblick (the engineer's view) in an iframe. */
+  .world .tabs { position: absolute; top: 5px; left: 8px; display: flex; gap: 2px; z-index: 2; }
+  .world .tabs button { font-weight: 600; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); background: none; border: 0; padding: 3px 6px; border-radius: 6px; }
+  .world .tabs button.on { color: var(--ink); background: var(--line); }
+  .world.lb #scene, .world.lb .viewtools, .world.lb .viewnote { display: none; }
+  #engineer { position: absolute; inset: 30px 0 0 0; border-top: 1px solid var(--line); }   /* below the tab strip, which stays ours */
+  #engineer iframe { display: block; width: 100%; height: 100%; border: 0; }
+  #engineer .note { position: absolute; left: 12px; right: 12px; top: 10px; font-size: 13px; color: var(--muted); }
   #scene { position: absolute; inset: 0; }
   #scene canvas { display: block; width: 100% !important; height: 100% !important; }
   .viewnote { position: absolute; left: 12px; right: 12px; bottom: 8px; font-size: 12.5px; color: var(--ask); pointer-events: none; }
@@ -136,9 +144,16 @@
     <div class="chips" id="suggest"></div>
   </section>
   <aside class="right">
-    <div class="world"><span class="k">World</span><div id="scene"></div>
+    <div class="world">
+      <div class="tabs" role="tablist" aria-label="Which view">
+        <button type="button" role="tab" id="view-world" class="on" title="Rosa's view: the robot, the plan, the route, the keep-out shapes">World</button>
+        <button type="button" role="tab" id="view-lichtblick" hidden title="Every topic, frame and message of the running system, in Lichtblick">Lichtblick</button>
+      </div>
+      <div id="scene"></div>
       <div class="viewtools"><button id="view-home" type="button" title="Go back to the home view">⌂ Home</button></div>
-      <div class="viewnote" id="viewnote">Loading the robot model…</div></div>
+      <div class="viewnote" id="viewnote">Loading the robot model…</div>
+      <div id="engineer" hidden><p class="note" id="engineer-note"></p></div>
+    </div>
     <div class="mapbox"><span class="k" id="map-k">Map · what the connected nodes offer</span><svg id="map"></svg></div>
   </aside>
 </main>
@@ -171,6 +186,16 @@
     <details class="sect" open>
       <summary>Safety limits</summary>
       <div class="limits" id="limits"><span id="limits-chips"></span><button id="limits-edit" type="button">Change</button><form id="limits-form" hidden></form></div>
+    </details>
+    <details class="sect">
+      <summary>Engineer's view</summary>
+      <form id="lichtblick-form" class="row">
+        <label for="lichtblick-url">Lichtblick address</label>
+        <input id="lichtblick-url" placeholder="http://localhost:8081 (empty hides the tab)" autocomplete="off">
+        <button type="submit">Save</button>
+        <span id="lichtblick-note" class="note"></span>
+      </form>
+      <p class="note">The World panel's second tab: Lichtblick, the open fork of Foxglove Studio, showing every topic, frame and message through foxglove_bridge on port 8765. start.sh starts both.</p>
     </details>
     <details class="sect robot-panel">
       <summary>Robot connection</summary>

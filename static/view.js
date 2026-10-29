@@ -183,6 +183,7 @@ document.getElementById("view-home").onclick = () => {
 
 function resize() {
   const w = el.clientWidth, h = el.clientHeight;
+  if (!w || !h) return;                        // hidden behind the Lichtblick tab: nothing to size
   renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); dirty = true;
 }
 new ResizeObserver(resize).observe(el); resize();

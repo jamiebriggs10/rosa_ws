@@ -18,6 +18,7 @@ One Flask app, one page (static/stage.html), and these JSON endpoints:
   GET  /capabilities         what the robot's system offers (discovery + the description file)
   POST /capabilities/rescan  read the graph and the description file again
   POST /ollama   {"url": ...}  test an Ollama address, save it, and list its models
+  POST /lichtblick {"url": ...}  where Lichtblick (the engineer's view) is served; "" hides its tab; saved
   POST /robot/mode    {"mode": "sim"|"real"}  which robot the connection panel checks; saved, returns the ladder
   POST /robot/action  {"name": ...}  one step of the connection ladder (bring the profile up, start the
                       driver, power on; 404 unknown, 403 real-robot steps from another computer, 409 failed)
@@ -736,6 +737,17 @@ def ollama_up():
         return False
 
 
+def lichtblick_up():
+    """Does Lichtblick answer at its address? An empty address (tab hidden) counts as not up."""
+    if not config.LICHTBLICK_URL:
+        return False
+    try:
+        urllib.request.urlopen(config.LICHTBLICK_URL, timeout=1)
+        return True
+    except Exception:
+        return False
+
+
 LIMIT_LABELS = {"MAX_STEP_CM": "one move (cm)", "MAX_PATH_REACH_CM": "path reach (cm)",
                 "MAX_JOINT_DEG": "joint turn (deg)", "MAX_PATH_STEPS": "points in a path"}
 
@@ -756,7 +768,7 @@ def ollama_models():
 
 
 def status():
-    s = {"ollama": ollama_up(), "moveit": False, "joint_states": False, "joints": {}, "tool_cm": None}
+    s = {"ollama": ollama_up(), "lichtblick": lichtblick_up(), "moveit": False, "joint_states": False, "joints": {}, "tool_cm": None}
     try:
         s.update(robot_tools.status())
     except Exception:
@@ -843,6 +855,7 @@ def state():
                    limits=limits(), ceilings=config.LIMIT_CEILINGS, labels=LIMIT_LABELS, speed=config.SPEED,
                    shown_path=generic_tools.last_path, ollama_url=config.OLLAMA_URL,
                    frames={"base": config.BASE_FRAME, "tool": config.TOOL_FRAME},
+                   lichtblick={"url": config.LICHTBLICK_URL, "up": bool(_cached_status().get("lichtblick"))},
                    robot=robot_link.latest, local=_local(), voice=voice_state())
 
 
@@ -869,6 +882,17 @@ def package_asset(package, rel):
     if found is None:
         return jsonify(error=f"{package}/{rel} not found"), 404
     return send_from_directory(found.parent, found.name)
+
+
+@app.post("/lichtblick")
+def lichtblick():
+    """Where the engineer's view is served; "" hides its tab. Saved for next time."""
+    url = (request.json or {}).get("url", "")
+    if not isinstance(url, str) or (url and not url.startswith("http")):
+        return jsonify(error="The address must start with http://, e.g. http://localhost:8081, or be empty to hide the tab."), 400
+    config.save_settings({"lichtblick_url": url.strip().rstrip("/")})
+    _status_cache.clear()                     # check the new address at the next poll
+    return jsonify(ok=True, url=config.LICHTBLICK_URL)
 
 
 @app.post("/command")

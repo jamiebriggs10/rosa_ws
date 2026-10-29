@@ -26,6 +26,7 @@ import re
 import sys
 import threading
 import time
+import urllib.request
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -112,6 +113,7 @@ class Mock:
         self.follow_until = 0.0
         self.voice = {**config.VOICE_DEFAULTS, "on": True}   # the voice block, as the console keeps it
         self.model, self.think = "mock-model", False
+        self.lichtblick_url, self.lichtblick_at, self.lichtblick_ok = config.LICHTBLICK_URL, 0.0, False
         self.rows = [dict(r) for r in BASE_ROWS]
         for i in range(rows):
             self.rows.append({"name": f"/controller_{i % 8}/thing_{i}", "kind": "topic", "type": "std_msgs/msg/Float64", "node": f"controller_{i % 8}",
@@ -188,6 +190,18 @@ class Mock:
             self._play(PHASE_SOUNDS[p])
         self.phase, self.phase_since = p, time.time()
 
+    def lichtblick_up(self):
+        """Does Lichtblick answer at its address? Asked at most every five seconds, so the page's
+        quarter-second poll never waits on it. The spike's container (scripts/lichtblick-spike) makes it true on the Mac."""
+        if time.time() - self.lichtblick_at > 5:
+            self.lichtblick_at = time.time()
+            try:
+                urllib.request.urlopen(self.lichtblick_url, timeout=1)
+                self.lichtblick_ok = True
+            except Exception:
+                self.lichtblick_ok = False
+        return bool(self.lichtblick_url) and self.lichtblick_ok
+
     def say(self, text):
         self.said = text
         if self.voice_unit:
@@ -203,6 +217,7 @@ class Mock:
                 "think": self.think, "joint_list": JOINTS, "limits": LIMITS, "ceilings": CEILINGS,
                 "labels": LABELS, "speed": 0.1, "shown_path": self.shown_path, "ollama_url": "http://localhost:11434",
                 "frames": {"base": "base", "tool": "tool0"}, "local": True,
+                "lichtblick": {"url": self.lichtblick_url, "up": self.lichtblick_up()},
                 "voice": {**(self.voice_unit.latest if self.voice_unit else
                              {"running": False, "state": "idle", "final": "", "felt_ms": None,
                               "error": "No voice in this mock: start it with --voice (the microphone) or --voice-file clip.wav."}),
@@ -638,6 +653,12 @@ def create_app(think_s=3.5, rows=0):
             if k in LIMITS and isinstance(v, (int, float)) and 0 < v <= CEILINGS[k]:
                 LIMITS[k] = v
         return jsonify(ok=True)
+
+    @app.post("/lichtblick")
+    def lichtblick():
+        mock.lichtblick_url = ((request.json or {}).get("url") or "").rstrip("/")
+        mock.lichtblick_at = 0
+        return jsonify(ok=True, url=mock.lichtblick_url)
 
     @app.post("/ollama")
     def ollama():

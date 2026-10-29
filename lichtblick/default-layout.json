@@ -1,0 +1,17 @@
+{
+  "configById": {
+    "3D!rosa": {
+      "followTf": "base_link",
+      "cameraState": {"perspective": true, "distance": 3, "phi": 60, "thetaOffset": 45, "targetOffset": [0, 0, 0.6], "target": [0, 0, 0], "targetOrientation": [0, 0, 0, 1], "fovy": 45, "near": 0.5, "far": 5000},
+      "scene": {"transforms": {"showLabel": false, "axisScale": 0.3}},
+      "transforms": {},
+      "topics": {"/robot_description": {"visible": true}, "/display_contacts": {"visible": true}},
+      "layers": {},
+      "publish": {"type": "point", "poseTopic": "/move_base_simple/goal", "pointTopic": "/clicked_point", "poseEstimateTopic": "/initialpose"}
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {"speed": 1},
+  "layout": "3D!rosa"
+}

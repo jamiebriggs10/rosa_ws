@@ -131,3 +131,16 @@ def test_the_code_no_longer_speaks_of_the_voice_app():
     files = [root / n for n in ("web_console.py", "config.py", "lines.py")] + list((root / "voice").glob("*.py")) + [f for f in STATIC.iterdir() if f.suffix in (".html", ".js", ".css")]
     hits = [f"{f.name}:{i}" for f in files for i, line in enumerate(f.read_text().splitlines(), 1) if "voice app" in line.lower()]
     assert not hits, hits
+
+
+def test_the_world_panel_has_two_view_tabs_and_a_layout_for_lichtblick():
+    """Rosa's view and Lichtblick's share the World panel behind two tabs; the layout Lichtblick
+    starts with shows the robot from /robot_description with no clicks."""
+    import json
+    page = (STATIC / "stage.html").read_text()
+    for there in ("view-world", "view-lichtblick", "engineer", "lichtblick-url", "lichtblick-note"):
+        assert f'id="{there}"' in page, there
+    layout = json.loads((STATIC.parent / "lichtblick" / "default-layout.json").read_text())
+    panel = layout["configById"][layout["layout"]]
+    assert layout["layout"].startswith("3D!") and panel["topics"]["/robot_description"]["visible"] is True
+    assert panel["scene"]["transforms"]["showLabel"] is False

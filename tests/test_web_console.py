@@ -936,3 +936,27 @@ def test_a_claim_without_a_tool_call_is_flagged(client, recorder):
     client.post("/command", json={"text": "go to x forty"})
     wait_until(lambda: not web_console.console.busy)
     assert client.get("/state").get_json()["messages"][-1]["text"] == "Keep z at 78.8?"
+
+
+def test_state_carries_lichtblick_and_its_address_is_saved(client, monkeypatch):
+    """The engineer's view: /state says where Lichtblick is and whether it answers; the address is
+    saved like Ollama's, must be http(s), and "" switches the tab off."""
+    monkeypatch.setattr(web_console.config, "LICHTBLICK_URL", "http://localhost:8081")
+    body = client.get("/state").get_json()
+    assert body["lichtblick"] == {"url": "http://localhost:8081", "up": False}
+    assert client.post("/lichtblick", json={"url": "ftp://x"}).status_code == 400
+    assert web_console.config.LICHTBLICK_URL == "http://localhost:8081"
+    r = client.post("/lichtblick", json={"url": "http://10.0.0.5:8081/"})
+    assert r.status_code == 200 and r.get_json()["url"] == "http://10.0.0.5:8081"
+    assert client.get("/state").get_json()["lichtblick"]["url"] == "http://10.0.0.5:8081"
+    assert web_console.config.load_settings()["lichtblick_url"] == "http://10.0.0.5:8081"
+    assert client.post("/lichtblick", json={"url": ""}).status_code == 200
+    assert client.get("/state").get_json()["lichtblick"]["url"] == ""
+
+
+def test_status_asks_lichtblick_once(monkeypatch):
+    calls = []
+    monkeypatch.setattr(web_console, "ollama_up", lambda: True)
+    monkeypatch.setattr(web_console, "lichtblick_up", lambda: calls.append(1) or True)
+    monkeypatch.setattr(web_console.robot_tools, "status", lambda: {})
+    assert web_console.status()["lichtblick"] is True and calls == [1]

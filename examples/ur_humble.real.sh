@@ -21,6 +21,14 @@ until ping -c 1 -W 1 "$ROBOT_IP" >/dev/null 2>&1; do
 done
 echo "[lab-driver] robot reachable, launching the driver"
 
+# foxglove_bridge feeds the console's Lichtblick tab (every topic, frame and mesh over one
+# WebSocket, port 8765). Skipped, with a line in the log, when the package is not installed.
+if ros2 pkg prefix foxglove_bridge >/dev/null 2>&1; then
+  ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765 > "$HOME/bridge.log" 2>&1 &
+else
+  echo "[bridge] foxglove_bridge is not installed (sudo apt install ros-humble-foxglove-bridge): the Lichtblick tab will have no data"
+fi
+
 (
   sleep 20
   while true; do

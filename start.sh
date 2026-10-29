@@ -3,7 +3,7 @@
 #
 #   sim     start the simulator and the robot software against it, then the console
 #   real    start the robot software against the real robot, then the console
-#   stop    stop the simulator and the robot software (the console keeps running)
+#   stop    stop the simulator and the robot software (the console and Lichtblick keep running)
 #   (none)  sim if the settings file has "robot_start_sim", else real if it has
 #           "robot_start", else the console only
 #
@@ -76,6 +76,23 @@ stop_session() {
   fi
 }
 
+start_lichtblick() {
+  # The engineer's view: Lichtblick's web build (the official image) on port 8081, with our
+  # layout baked in, so the console's Lichtblick tab has something to show. Left running by
+  # "stop", like the console. No Docker, or no image and no network: a note, not a failure.
+  command -v docker >/dev/null || { echo "  lichtblick: Docker is not installed, so the Lichtblick tab stays empty (setup-machine.sh installs it)"; return 0; }
+  if [ -n "$(docker ps -q -f name='^rosa-lichtblick$' 2>/dev/null)" ]; then echo "  lichtblick: already running on port 8081"; return 0; fi
+  docker rm -f rosa-lichtblick >/dev/null 2>&1 || true
+  # lichtblick/Dockerfile: the official image plus our layout. Built here so a changed layout
+  # is picked up at the next start (seconds when nothing changed).
+  if docker build -q -t rosa-lichtblick "$HERE/lichtblick" >/dev/null 2>&1 \
+     && docker run -d --name rosa-lichtblick --restart unless-stopped -p 8081:8080 rosa-lichtblick >/dev/null 2>&1; then
+    echo "  lichtblick: started on port 8081 (container rosa-lichtblick)"
+  else
+    echo "  lichtblick: could not start (docker pull ghcr.io/lichtblick-suite/lichtblick:latest, or are you in the docker group?)"
+  fi
+}
+
 import_display() {
   # The console runs as a systemd user service, which does not know which screen you are
   # logged in on. Handing it DISPLAY (X11), XAUTHORITY and WAYLAND_DISPLAY lets the page's
@@ -98,12 +115,14 @@ case "$MODE" in
     echo "Simulator and robot software (sim):"
     if [ -n "$SIM_START" ]; then run_in_tmux sim "$SIM_START" "$HOME/sim.log"
     else echo "  sim: no \"sim_start\" set, so the robot_start_sim script is expected to start the simulator itself (the example does)"; fi
-    run_in_tmux robot "$ROBOT_START_SIM" "$HOME/robot.log" ;;
+    run_in_tmux robot "$ROBOT_START_SIM" "$HOME/robot.log"
+    start_lichtblick ;;
   real)
     [ -n "$ROBOT_START" ] || fail "No \"robot_start\" in $SETTINGS. Point it at a script that starts your driver and MoveIt against the real robot (see examples/)."
     refuse_remote_real
     echo "Robot software (real robot):"
-    run_in_tmux robot "$ROBOT_START" "$HOME/robot.log" ;;
+    run_in_tmux robot "$ROBOT_START" "$HOME/robot.log"
+    start_lichtblick ;;
   console)
     echo "Robot software: nothing to start. Start your robot's driver and MoveIt yourself, or put the command in $SETTINGS as \"robot_start_sim\" or \"robot_start\"." ;;
   -h|--help)

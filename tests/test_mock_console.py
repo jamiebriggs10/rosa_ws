@@ -137,3 +137,9 @@ def test_mock_asks_when_a_coordinate_is_missing_and_carries_on(client):
     client.post("/command", json={"text": "keep it"})
     wait_until(lambda: client.get("/state").get_json()["pending"])
     assert client.get("/state").get_json()["pending"]["facts"]["to_cm"] == [20, -60, 78.5]
+
+
+def test_the_mock_has_the_engineer_view(client):
+    s = client.get("/state").get_json()
+    assert set(s["lichtblick"]) == {"url", "up"} and s["lichtblick"]["url"].startswith("http")
+    assert client.post("/lichtblick", json={"url": ""}).get_json()["ok"] is True

@@ -33,6 +33,15 @@ WORKSPACES = []
 # Ollama's default. Entered on the console's settings panel; this is only the default.
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 
+# --- The engineer's view ---------------------------------------------------------
+
+# Where Lichtblick is served: the open fork of Foxglove Studio (MPL-2.0), which shows every
+# topic, frame and message of the running system. start.sh runs its web build in Docker on
+# port 8081 with lichtblick/default-layout.json baked in, and the console page shows it in
+# the World panel behind a tab. Empty hides the tab. Entered on the console's settings
+# panel; this is only the default.
+LICHTBLICK_URL = os.environ.get("LICHTBLICK_URL", "http://localhost:8081")
+
 # Which local model to use. Must support tool calling.
 MODEL = os.environ.get("ROSA_MODEL", "llama3.1:8b")
 
@@ -212,11 +221,14 @@ def load_settings(path=None):
 def apply_settings(settings):
     """Copy valid values from a settings dict onto this module. Bad values are ignored,
     so a damaged file can never stop the console from starting."""
-    global OLLAMA_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES
+    global OLLAMA_URL, LICHTBLICK_URL, MODEL, THINK, ALLOW_UNLISTED_WRITES, INTERFACES_FILE, WORKSPACES
     global ROBOT_MODE, ROBOT_IP, COMPUTER_IP, ROBOT_PORT, NETWORK_PROFILE, URSIM_IP
     url = settings.get("ollama_url")
     if isinstance(url, str) and url.startswith("http"):
         OLLAMA_URL = url.rstrip("/")
+    url = settings.get("lichtblick_url")
+    if isinstance(url, str) and (url == "" or url.startswith("http")):     # "" switches the tab off
+        LICHTBLICK_URL = url.rstrip("/")
     for key, value in (settings.get("voice") or {}).items():
         if key in VOICE_CHECKS and VOICE_CHECKS[key](value):
             VOICE[key] = value

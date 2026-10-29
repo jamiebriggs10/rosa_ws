@@ -203,9 +203,21 @@ spoken line:
 | follow | amber, dim | | (the follow-up window: no wake word needed) |
 
 The **Settings** pop-up holds every setting: the model and the Ollama address, the safety
-limits, the robot-connection ladder, the Voice section (below), what the system offers (with
-the map's "show ROS"), and the session buttons (new conversation; finish, which writes the
-session table to `sessions/`).
+limits, the engineer's view (below), the robot-connection ladder, the Voice section (below),
+what the system offers (with the map's "show ROS"), and the session buttons (new
+conversation; finish, which writes the session table to `sessions/`).
+
+**The World panel has two tabs.** *World* is Rosa's own view: the robot, the orange ghost
+playing the plan, the purple route, the keep-out shapes. *Lichtblick* is the engineer's view:
+[Lichtblick](https://github.com/lichtblick-suite/lichtblick) (the open fork of Foxglove
+Studio, MPL-2.0) in an iframe, showing every topic, frame, message, image and plot of the
+running system through `foxglove_bridge` (port 8765). `start.sh sim|real` starts both the
+bridge (in the robot session, when `ros-humble-foxglove-bridge` is installed) and Lichtblick's
+web build (the official Docker image, port 8081, with `lichtblick/default-layout.json` baked
+in). The address is the `lichtblick_url` setting (default `http://localhost:8081`; empty hides
+the tab), under Settings › Engineer's view. The iframe exists only while its tab is chosen,
+since Lichtblick renders continuously and the browser shares the GPU with Ollama. Details in
+`lichtblick/README.md`.
 
 **The map** draws `/capabilities`: Rosa in the middle, one node per program (MoveIt, the UR
 driver, and every node the description file names or whose interfaces it describes), one
@@ -339,6 +351,7 @@ added the same way, one tool per type, never per node.
 | `static/stage.html` | the page; it loads `view.js` (the 3D view), `panels.js` + `panels.css` (the settings pop-up) and `map.js` (the capability map); `static/meshes/` holds the UR meshes for the mock |
 | `setup-machine.sh` | the once-only sudo steps for a fresh Ubuntu 22.04 computer |
 | `install.sh`, `run.sh`, `start.sh` | install; run the console; turn everything on (`sim`, `real`, `stop`) |
+| `lichtblick/` | the engineer's view: Lichtblick's layout, its Dockerfile and a README |
 | `robot_link.py` | the robot-connection ladder: the checks, the actions, the `robot_status` tool |
 | `voice/` | the voice front end: `words.py`, `audio.py`, `stages.py`, `pipeline.py`, `speech.py`, `models.py`, and the `Voice` object in `__init__.py` |
 | `models/` | the speech models (git-ignored) and the wake word `truffles.onnx` (committed) |

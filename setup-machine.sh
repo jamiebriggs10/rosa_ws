@@ -133,7 +133,8 @@ ros2_humble() {
     apt_update
     DONE+=("added the ROS 2 package source ($tag)")
   fi
-  apt_install ros-humble-desktop ros-dev-tools ros-humble-moveit ros-humble-ur ros-humble-ros2controlcli python3-colcon-common-extensions
+  apt_install ros-humble-desktop ros-dev-tools ros-humble-moveit ros-humble-ur ros-humble-ros2controlcli python3-colcon-common-extensions \
+    ros-humble-foxglove-bridge                  # feeds the console's Lichtblick tab (the engineer's view)
 }
 
 docker_engine() {
@@ -157,6 +158,13 @@ docker_engine() {
   else
     $SUDO usermod -aG docker "$ME"
     DONE+=("added $ME to the docker group (counts from the next login)")
+  fi
+  # Lichtblick's web build, the console's engineer's view; start.sh runs it. Pulled now so the
+  # first start.sh does not wait for a download. Needs the docker group, so sudo if not yet in it.
+  if $SUDO docker image inspect ghcr.io/lichtblick-suite/lichtblick:latest >/dev/null 2>&1; then
+    echo "  the Lichtblick image is already here"
+  else
+    $SUDO docker pull -q ghcr.io/lichtblick-suite/lichtblick:latest && DONE+=("pulled the Lichtblick image")
   fi
 }
 
