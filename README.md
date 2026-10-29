@@ -75,11 +75,27 @@ meshes and messages:
 curl -fsSL https://raw.githubusercontent.com/jamiebriggs10/rosa_ws/main/install.sh | bash -s -- --workspace ~/my_robot_ws/install/setup.bash
 ```
 
-The installer clones this repository to `~/rosa_ws`, makes a Python venv,
-installs the Python packages, writes `~/.config/rosa_ws/settings.json`, and
-starts the console as a user service (`rosa-console`) that comes back at
-every login. It never needs `sudo` and never touches the robot's workspace.
-It ends by printing the address to open. Run it again at any time to update.
+The installer first reports what this computer has and what is missing
+(MoveIt, the UR driver, foxglove_bridge, tmux, Docker, the sound libraries, an
+NVIDIA GPU, Ollama, the robot workspace), with the command that gets each one;
+only ROS 2, git and Python's venv are required to go on. Then it clones this
+repository to `~/rosa_ws` (or updates it), makes a Python venv, installs the
+Python packages (the GPU build of onnxruntime when there is an NVIDIA card),
+fetches the voice models, writes `~/.config/rosa_ws/settings.json`, builds the
+Lichtblick image when Docker is usable, and starts the console as a user
+service (`rosa-console`) that comes back at every login. It never needs
+`sudo` and never touches the robot's workspace. It ends by printing the
+address to open. Run it again at any time to update: every step is skipped or
+repeated harmlessly.
+
+For the Strathclyde UR12e cell, add `--lab`: the example settings (the two
+bringup scripts, the robot and computer addresses, the Jabra microphone), the
+cell's `interfaces.yaml`, and the `UR_humble` workspace are filled in where
+not already set.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jamiebriggs10/rosa_ws/main/install.sh | bash -s -- --lab
+```
 
 Without a service: `install.sh --no-service`, then `~/rosa_ws/run.sh` by hand.
 

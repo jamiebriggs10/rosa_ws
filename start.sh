@@ -135,6 +135,11 @@ if [ "$CONSOLE" = 1 ]; then
   import_display
   if systemctl --user restart rosa-console 2>/dev/null; then
     echo "Console: restarted (service rosa-console)."
+    # From the box's own desktop (a screen, not SSH): open the page once it answers.
+    if [ -n "${DISPLAY:-}" ] && [ -z "${SSH_CONNECTION:-}" ] && command -v xdg-open >/dev/null; then
+      for i in $(seq 1 20); do curl -fs -m 1 http://localhost:8000/state >/dev/null 2>&1 && break; sleep 1; done
+      xdg-open http://localhost:8000 >/dev/null 2>&1 &
+    fi
   else
     echo "Console: no service installed; run $HERE/install.sh first, or start it with $HERE/run.sh"
   fi
