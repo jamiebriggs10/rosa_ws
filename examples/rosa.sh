@@ -9,20 +9,22 @@
 #   ~/Desktop/rosa.sh stop       stop the simulator and the robot software (console stays up)
 #   ~/Desktop/rosa.sh status     what is running, and the addresses
 #
-# "update" is the one-line installer from GitHub (install.sh --lab), which reports what this
-# computer has and what is missing, and then the one apt package it cannot add itself. When
-# GitHub cannot be reached, the copy already in ~/rosa_ws is used. install.sh --lab puts a
-# fresh copy of this file on the Desktop every time, so it keeps up with the repository.
+# "update" pulls the repository in ~/rosa_ws and runs its installer (install.sh --lab), which
+# reports what this computer has and what is missing, and then adds the one apt package the
+# installer cannot. The installer is run from the pulled copy, not fetched from GitHub's raw
+# address, because that address is cached for minutes and can serve a stale file right after
+# a push. install.sh --lab puts a fresh copy of this file on the Desktop every time.
 set -uo pipefail
 MODE="${1:-sim}"
 ONE_LINER="https://raw.githubusercontent.com/jamiebriggs10/rosa_ws/main/install.sh"
 
 update() {
-  echo "== Updating (install.sh --lab)"
-  if curl -fsSL -m 20 "$ONE_LINER" | bash -s -- --lab; then :
-  else
-    echo "== GitHub not reachable or the installer failed; trying the copy in ~/rosa_ws"
+  echo "== Updating"
+  if [ -d ~/rosa_ws/.git ]; then
+    git -C ~/rosa_ws pull -q --ff-only || echo "== Could not pull (offline, or local changes?); installing what is here"
     bash ~/rosa_ws/install.sh --lab || { echo "Install failed: read the lines above."; exit 1; }
+  else
+    curl -fsSL -m 20 "$ONE_LINER" | bash -s -- --lab || { echo "Install failed: read the lines above."; exit 1; }
   fi
   # Packages the installer reports as missing need sudo, which it never uses. The new one
   # since 29 October is foxglove_bridge; add it here when a person is at the keyboard.
