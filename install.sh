@@ -139,8 +139,10 @@ if example:        # --lab: the cell's example settings fill in whatever is not 
     added = [k for k, v in json.loads(pathlib.Path(example).read_text()).items() if settings.setdefault(k, v) is v]
     print(f"  From the lab example: {', '.join(added) if added else 'nothing, all set already'}")
 settings.setdefault("ollama_url", "http://localhost:11434")
-if workspaces:
-    settings["workspaces"] = sorted(set(settings.get("workspaces", [])) | set(workspaces))
+for ws in workspaces:      # add each unless it is already there, however "~" was spelt
+    known = {pathlib.Path(w).expanduser() for w in settings.get("workspaces", [])}
+    if pathlib.Path(ws).expanduser() not in known:
+        settings.setdefault("workspaces", []).append(ws)
 settings.setdefault("workspaces", [])
 path.write_text(json.dumps(settings, indent=2) + "\n")
 print(f"  Ollama: {settings['ollama_url']}   (change it on the page under Settings)")

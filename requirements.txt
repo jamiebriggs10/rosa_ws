@@ -12,5 +12,7 @@ soxr==1.1.0                  # resampling the microphone's rate to 16 kHz
 soundfile==0.14.0            # WAV files (libsndfile: apt install libsndfile1)
 onnxruntime>=1.20            # Silero VAD and openWakeWord; the lab PC swaps in onnxruntime-gpu by hand
 openwakeword==0.6.0          # the wake word "truffles" (models/truffles.onnx)
+scipy>=1.13                  # openwakeword imports scikit-learn, which needs a scipy built for numpy 2; a ROS desktop's
+                             # system scipy (1.8 on Ubuntu 22.04) is seen through the venv and fails, so the venv gets its own
 sherpa-onnx==1.13.8          # Parakeet speech-to-text, int8, CPU or CUDA
 piper-tts==1.8.0             # Rosa's voice; GPL-3.0, cited in the dissertation
