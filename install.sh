@@ -156,6 +156,12 @@ if [ ! -f "$CONF/interfaces.yaml" ]; then
   fi
 fi
 
+if [ "$LAB" = 1 ] && [ -d "$HOME/Desktop" ]; then
+  # The Desktop launcher: update and start in one file (examples/rosa.sh). Refreshed every run.
+  cp "$DIR/examples/rosa.sh" "$HOME/Desktop/rosa.sh" && chmod +x "$HOME/Desktop/rosa.sh"
+  echo "  Desktop launcher: ~/Desktop/rosa.sh  (sim | real | update | stop | status)"
+fi
+
 say "Lichtblick (the engineer's view) and foxglove_bridge"
 if docker ps >/dev/null 2>&1; then
   if docker build -q -t rosa-lichtblick "$DIR/lichtblick" >/dev/null 2>&1; then echo "  image rosa-lichtblick built (start.sh runs it on port 8081)"

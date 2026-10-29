@@ -97,6 +97,10 @@ not already set.
 curl -fsSL https://raw.githubusercontent.com/jamiebriggs10/rosa_ws/main/install.sh | bash -s -- --lab
 ```
 
+`--lab` also puts `rosa.sh` on the Desktop (from `examples/`): `~/Desktop/rosa.sh`
+updates and starts the simulator, `rosa.sh real` the robot, `rosa.sh update`,
+`stop` and `status` do what they say. It refreshes itself at every update.
+
 Without a service: `install.sh --no-service`, then `~/rosa_ws/run.sh` by hand.
 
 With the model on the same computer: `install.sh --with-ollama` also installs
